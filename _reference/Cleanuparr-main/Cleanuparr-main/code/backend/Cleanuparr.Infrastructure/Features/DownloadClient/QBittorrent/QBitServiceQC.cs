@@ -1,0 +1,137 @@
+﻿using Cleanuparr.Domain.Entities;
+using Cleanuparr.Domain.Enums;
+using Cleanuparr.Infrastructure.Extensions;
+using Cleanuparr.Infrastructure.Features.Context;
+using Cleanuparr.Persistence.Models.Configuration.QueueCleaner;
+using Microsoft.Extensions.Logging;
+using QBittorrent.Client;
+
+namespace Cleanuparr.Infrastructure.Features.DownloadClient.QBittorrent;
+
+public partial class QBitService
+{
+    /// <inheritdoc/>
+    public override async Task<DownloadCheckResult> ShouldRemoveFromArrQueueAsync(string hash, IReadOnlyList<string> ignoredDownloads)
+    {
+        DownloadCheckResult result = new();
+        TorrentInfo? download = (await _client.GetTorrentListAsync(new TorrentListQuery { Hashes = [hash] }))
+            .FirstOrDefault();
+
+        if (download is null)
+        {
+            _logger.LogDebug("Failed to find torrent {hash} in the {name} download client", hash, _downloadClientConfig.Name);
+            return result;
+        }
+
+        IReadOnlyList<TorrentTracker> trackers = await GetTrackersAsync(hash);
+
+        TorrentProperties? torrentProperties = await _client.GetTorrentPropertiesAsync(hash);
+
+        if (torrentProperties is null)
+        {
+            _logger.LogError("Failed to find torrent properties for {name}", download.Name);
+            return result;
+        }
+
+        result.IsPrivate = torrentProperties.AdditionalData.TryGetValue("is_private", out var dictValue) &&
+                           bool.TryParse(dictValue?.ToString(), out bool boolValue)
+                           && boolValue;
+        
+        result.Found = true;
+        SetDownloadClientContext();
+
+        // Create ITorrentItem wrapper for consistent interface usage
+        QBitItemWrapper torrent = new(download, trackers, result.IsPrivate);
+
+        if (torrent.IsIgnored(ignoredDownloads))
+        {
+            _logger.LogInformation("skip | download is ignored | {name}", torrent.Name);
+            return result;
+        }
+
+        IReadOnlyList<TorrentContent>? files = await _client.GetTorrentContentsAsync(hash);
+
+        if (files?.Count is > 0 && files.All(x => x.Priority is TorrentContentPriority.Skip))
+        {
+            result.ShouldRemove = true;
+
+            // if all files were blocked by qBittorrent
+            if (download is { CompletionOn: not null, Downloaded: null or 0 })
+            {
+                _logger.LogDebug("all files are unwanted by qBit | removing download | {name}", torrent.Name);
+                result.DeleteReason = DeleteReason.AllFilesSkippedByQBit;
+                result.DeleteFromClient = true;
+                return result;
+            }
+
+            // remove if all files are unwanted
+            _logger.LogDebug("all files are unwanted | removing download | {name}", torrent.Name);
+            result.DeleteReason = DeleteReason.AllFilesSkipped;
+            result.DeleteFromClient = true;
+            return result;
+        }
+
+        (result.ShouldRemove, result.DeleteReason, result.DeleteFromClient, result.ChangeCategory) = await EvaluateDownloadRemoval(torrent);
+
+        return result;
+    }
+
+    private async Task<(bool ShouldRemove, DeleteReason Reason, bool DeleteFromClient, bool ChangeCategory)> EvaluateDownloadRemoval(ITorrentItemWrapper wrapper)
+    {
+        (bool ShouldRemove, DeleteReason Reason, bool DeleteFromClient, bool ChangeCategory) slowResult = await CheckIfSlow(wrapper);
+
+        if (slowResult.ShouldRemove)
+        {
+            return slowResult;
+        }
+
+        return await CheckIfStuck(wrapper);
+    }
+
+    private async Task<(bool ShouldRemove, DeleteReason Reason, bool DeleteFromClient, bool ChangeCategory)> CheckIfSlow(ITorrentItemWrapper wrapper)
+    {
+        if (!wrapper.IsDownloading())
+        {
+            _logger.LogTrace("skip slow check | download is not in downloading state | {name}", wrapper.Name);
+            return (false, DeleteReason.None, false, false);
+        }
+
+        if (wrapper.DownloadSpeed <= 0)
+        {
+            _logger.LogTrace("skip slow check | download speed is 0 | {name}", wrapper.Name);
+            return (false, DeleteReason.None, false, false);
+        }
+
+        return await _queueRuleEvaluator.EvaluateSlowRulesAsync(wrapper);
+    }
+
+    private async Task<(bool ShouldRemove, DeleteReason Reason, bool DeleteFromClient, bool ChangeCategory)> CheckIfStuck(ITorrentItemWrapper wrapper)
+    {
+        if (((QBitItemWrapper)wrapper).IsMetadataDownloading())
+        {
+            var queueCleanerConfig = ContextProvider.Get<QueueCleanerConfig>(nameof(QueueCleanerConfig));
+
+            if (queueCleanerConfig.DownloadingMetadataMaxStrikes > 0)
+            {
+                bool shouldRemove = await _striker.StrikeAndCheckLimit(
+                    wrapper.Hash,
+                    wrapper.Name,
+                    queueCleanerConfig.DownloadingMetadataMaxStrikes,
+                    StrikeType.DownloadingMetadata
+                );
+
+                return (shouldRemove, DeleteReason.DownloadingMetadata, shouldRemove, false);
+            }
+
+            return (false, DeleteReason.None, false, false);
+        }
+
+        if (!wrapper.IsStalled())
+        {
+            _logger.LogTrace("skip stalled check | download is not in stalled state | {name}", wrapper.Name);
+            return (false, DeleteReason.None, false, false);
+        }
+
+        return await _queueRuleEvaluator.EvaluateStallRulesAsync(wrapper);
+    }
+}

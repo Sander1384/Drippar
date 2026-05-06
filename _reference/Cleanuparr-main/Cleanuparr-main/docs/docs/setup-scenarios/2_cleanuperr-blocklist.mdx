@@ -1,0 +1,39 @@
+import {
+  StepGuide,
+  Step,
+  Note,
+  styles
+} from '@site/src/components/documentation';
+
+# Using Cleanuparr's Malware Blocker
+
+Configure Cleanuparr's Malware Blocker feature to automatically filter downloads based on custom blocklists.
+
+<div className={styles.documentationPage}>
+
+<div className={styles.section}>
+
+<StepGuide>
+  <Step title="Enable Malware Blocker">
+    Use **Cleanuparr** with `Malware Blocker` enabled.
+  </Step>
+
+  <Step title="Configure Blocklist">
+    Configure the `Blocklist Path` to use a blacklist:
+    - [blacklist](https://raw.githubusercontent.com/Cleanuparr/Cleanuparr/refs/heads/main/blacklist), or
+    - [permissive blacklist](https://raw.githubusercontent.com/Cleanuparr/Cleanuparr/refs/heads/main/blacklist_permissive), or
+    - create your own
+  </Step>
+
+  <Step title="Automated Processing">
+    The **Malware Blocker** will perform a cleanup process as described in the [How it works](/docs/how_it_works) section.
+  </Step>
+</StepGuide>
+
+<Note>
+This scenario is an example for blocking malicious files. Other features can be included here by configuring the environment variables.
+</Note>
+
+</div>
+
+</div>

@@ -1,0 +1,112 @@
+---
+sidebar_position: 3
+---
+
+import { Important } from '@site/src/components/documentation';
+import {
+  AppCard,
+  styles
+} from '@site/src/components/documentation';
+import useBaseUrl from '@docusaurus/useBaseUrl';
+
+# Supported Apps
+
+Cleanuparr integrates with the servarr applications and download clients for media management automation.
+
+<div className={styles.documentationPage}>
+
+<Important>
+Only the latest versions of the following applications are supported, unless explicitly specified otherwise.
+</Important>
+
+<AppCard
+  title="Media Management"
+  apps={[
+    {
+      name: 'Sonarr',
+      iconLight: useBaseUrl('/img/icons/sonarr-light.svg'),
+      iconDark: useBaseUrl('/img/icons/sonarr-dark.svg'),
+      url: 'https://sonarr.tv',
+      color: '#3578e5'
+    },
+    {
+      name: 'Radarr',
+      iconLight: useBaseUrl('/img/icons/radarr-light.svg'),
+      iconDark: useBaseUrl('/img/icons/radarr-dark.svg'),
+      url: 'https://radarr.video',
+      color: '#ffc107'
+    },
+    {
+      name: 'Lidarr',
+      iconLight: useBaseUrl('/img/icons/lidarr-light.svg'),
+      iconDark: useBaseUrl('/img/icons/lidarr-dark.svg'),
+      url: 'https://lidarr.audio',
+      color: '#28a745'
+    },
+    {
+      name: 'Readarr',
+      iconLight: useBaseUrl('/img/icons/readarr-light.svg'),
+      iconDark: useBaseUrl('/img/icons/readarr-dark.svg'),
+      url: 'https://readarr.com',
+      color: '#ff0000ff'
+    },
+    {
+      name: 'Whisparr v2',
+      iconLight: useBaseUrl('/img/icons/whisparr-light.svg'),
+      iconDark: useBaseUrl('/img/icons/whisparr-dark.svg'),
+      url: 'https://whisparr.com',
+      color: '#e83e8c'
+    },
+    {
+      name: 'Whisparr v3',
+      iconLight: useBaseUrl('/img/icons/whisparr-light.svg'),
+      iconDark: useBaseUrl('/img/icons/whisparr-dark.svg'),
+      url: 'https://whisparr.com',
+      color: '#e83e8c'
+    }
+  ]}
+/>
+
+<AppCard
+  title="Download Clients"
+  apps={[
+    {
+      name: 'qBittorrent',
+      iconLight: useBaseUrl('/img/icons/qbittorrent-light.svg'),
+      iconDark: useBaseUrl('/img/icons/qbittorrent-dark.svg'),
+      description: '(recommended)',
+      url: 'https://www.qbittorrent.org',
+      color: '#2b75d9'
+    },
+    {
+      name: 'Deluge',
+      iconLight: useBaseUrl('/img/icons/deluge-light.svg'),
+      iconDark: useBaseUrl('/img/icons/deluge-dark.svg'),
+      url: 'https://deluge-torrent.org',
+      color: '#094491'
+    },
+    {
+      name: 'Transmission',
+      iconLight: useBaseUrl('/img/icons/transmission-light.svg'),
+      iconDark: useBaseUrl('/img/icons/transmission-dark.svg'),
+      url: 'https://transmissionbt.com',
+      color: '#e90f0fff'
+    },
+    {
+      name: 'µTorrent',
+      iconLight: useBaseUrl('/img/icons/utorrent-light.svg'),
+      iconDark: useBaseUrl('/img/icons/utorrent-dark.svg'),
+      url: 'https://www.utorrent.com',
+      color: '#0ce216ff'
+    },
+    {
+      name: 'rTorrent',
+      iconLight: useBaseUrl('/img/icons/rtorrent-light.svg'),
+      iconDark: useBaseUrl('/img/icons/rtorrent-dark.svg'),
+      url: 'https://rakshasa.github.io/rtorrent/',
+      color: '#888888'
+    }
+  ]}
+/>
+
+</div>

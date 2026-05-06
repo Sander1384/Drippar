@@ -1,0 +1,29 @@
+<div class="paginator">
+  <div class="paginator__left">
+    @if (pageSizeOptions().length > 0) {
+      <div class="paginator__page-size">
+        <span class="paginator__page-size-label">Rows per page:</span>
+        <app-select
+          [options]="pageSizeSelectOptions()"
+          [value]="pageSize()"
+          placement="top"
+          (valueChange)="onPageSizeChange($event)"
+        />
+      </div>
+    }
+    <span class="paginator__info">
+      <app-animated-counter [value]="displayRange().start" [duration]="300" />–<app-animated-counter [value]="displayRange().end" [duration]="300" /> of <app-animated-counter [value]="totalRecords()" [duration]="300" />
+    </span>
+  </div>
+  <div class="paginator__controls">
+    <app-button variant="ghost" size="sm" [disabled]="!canGoPrevious()" (clicked)="previousPage()">
+      Previous
+    </app-button>
+    <span class="paginator__page">
+      Page <app-animated-counter [value]="currentPage()" [duration]="300" /> of <app-animated-counter [value]="totalPages()" [duration]="300" />
+    </span>
+    <app-button variant="ghost" size="sm" [disabled]="!canGoNext()" (clicked)="nextPage()">
+      Next
+    </app-button>
+  </div>
+</div>

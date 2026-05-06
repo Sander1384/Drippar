@@ -1,0 +1,279 @@
+---
+sidebar_position: 1
+---
+
+import {
+  ConfigSection,
+  Note,
+  Warning,
+  ElementNavigator,
+  SectionTitle,
+  styles
+} from '@site/src/components/documentation';
+
+# General
+
+General configuration settings that apply to the entire Cleanuparr application.
+
+<ElementNavigator />
+
+<div className={styles.documentationPage}>
+
+<div className={styles.section}>
+
+<SectionTitle>System Settings</SectionTitle>
+
+<ConfigSection
+  title="Display Support Banner"
+>
+
+Shows the support section on the dashboard with links to GitHub and sponsors.
+
+</ConfigSection>
+
+<ConfigSection
+  title="Dry Run"
+>
+
+Logs all operations without making changes. Test your configuration safely before enabling live deletions and notifications.
+
+</ConfigSection>
+
+<ConfigSection
+  title="Status Check"
+>
+
+Periodically checks for new Cleanuparr versions. Disable this if your environment has restricted outbound network access.
+
+<Note>
+When disabled, the version check and "update available" notification in the sidebar will not appear.
+</Note>
+
+</ConfigSection>
+
+</div>
+
+<div className={styles.section}>
+
+<SectionTitle>Authentication</SectionTitle>
+
+<ConfigSection
+  title="Disable Auth for Local Addresses"
+>
+
+Bypass authentication for requests originating from local network addresses. When enabled, users on the local network can access Cleanuparr without logging in.
+
+**Built-in trusted ranges:**
+- `127.0.0.0/8` / `::1` (localhost)
+- `10.0.0.0/8` (Class A private)
+- `172.16.0.0/12` (Class B private)
+- `192.168.0.0/16` (Class C private)
+- IPv6 link-local (`fe80::`) and unique-local (`fd00::`) addresses
+
+<Warning>
+Only enable this if your Cleanuparr instance is not exposed to the internet. Anyone on your local network will have full access without authentication.
+</Warning>
+
+</ConfigSection>
+
+<ConfigSection
+  title="Trust Forwarded Headers"
+>
+
+When running behind a reverse proxy (e.g. Nginx, Caddy, Traefik), enable this to use `X-Forwarded-For` and `X-Real-IP` headers to determine the client's real IP address instead of the proxy's address.
+
+<Warning>
+Only enable this if you are using a reverse proxy that you control. Enabling this without a proxy in front, or with a proxy that doesn't overwrite/append `X-Forwarded-For`, allows remote clients to spoof their IP and bypass authentication when *Disable Auth for Local Addresses* is also enabled.
+</Warning>
+
+</ConfigSection>
+
+<ConfigSection
+  title="Additional Trusted Networks"
+>
+
+Add custom IP addresses or CIDR ranges that should bypass authentication, in addition to the built-in local address ranges.
+
+**Examples:**
+```
+192.168.1.0/24
+10.0.50.0/24
+172.20.0.5
+```
+
+</ConfigSection>
+
+</div>
+
+<div className={styles.section}>
+
+<SectionTitle>HTTP Configuration</SectionTitle>
+
+<ConfigSection
+  title="HTTP Max Retries"
+>
+
+Number of retry attempts for failed HTTP requests to *arrs, download clients, and other services.
+
+</ConfigSection>
+
+<ConfigSection
+  title="HTTP Timeout"
+>
+
+Seconds to wait before timing out HTTP requests to *arrs, download clients, and other services.
+
+</ConfigSection>
+
+<ConfigSection
+  title="HTTP Certificate Validation"
+>
+
+SSL certificate validation for HTTPS connections.
+
+**Options:**
+- **Enabled:** Validate all SSL certificates
+- **Disabled for Local Addresses:** Skip validation for local/private IP addresses only
+- **Disabled:** Skip all validation (not recommended)
+
+</ConfigSection>
+
+</div>
+
+<div className={styles.section}>
+
+<SectionTitle>Download Management</SectionTitle>
+
+<ConfigSection
+  title="Ignored Downloads"
+>
+
+Downloads matching these patterns are skipped during all cleaning operations. Match by:
+- Torrent hash
+- qBittorrent tag or category
+- Deluge label
+- Transmission category (last directory from the save location)
+- µTorrent label
+- rtorrent label
+- Tracker domain
+
+**Examples:**
+```
+fa800a7d7c443a2c3561d1f8f393c089036dade1
+tv-sonarr
+qbit-tag
+mytracker.com
+```
+
+</ConfigSection>
+
+</div>
+
+<div className={styles.section}>
+
+<SectionTitle>State Management</SectionTitle>
+
+<ConfigSection
+  title="Strike Inactivity Window"
+>
+
+Controls how long strike data is retained using a **sliding window**. Strikes for a download are automatically cleaned up after the download goes this many hours without receiving a new strike.
+
+**How it works:**
+- The window resets every time a new strike is recorded for a download
+- As long as a download keeps getting new strikes, all of its strike history is preserved
+- Once a download stops receiving strikes for the configured number of hours, all of its strikes are removed
+- This effectively means: "forget about downloads that haven't been problematic recently"
+
+**Example:** With a value of `72` hours (3 days):
+- Download A receives strikes on Monday, Tuesday, and Wednesday. On Saturday (72 hours after the last strike on Wednesday), all of its strikes are cleaned up.
+- Download B receives a strike on Monday. On Thursday (72 hours later), its strike is cleaned up.
+- Download C receives strikes on Monday and Thursday. The window resets on Thursday, so cleanup happens on Sunday (72 hours after Thursday).
+
+<Note>
+Lower values clean up strikes faster, but may cause Cleanuparr to re-strike downloads it has already dealt with. This value needs to be adjusted based on your Queue Cleaner run interval.
+</Note>
+
+</ConfigSection>
+
+<ConfigSection
+  title="Purge All Strikes"
+>
+
+Immediately and permanently deletes all strike data for all downloads. This resets all strike counters to zero.
+
+<Warning>
+This action cannot be undone. All downloads will start with zero strikes after a purge, which means previously problematic downloads may need to accumulate strikes again before being acted upon.
+</Warning>
+
+</ConfigSection>
+
+</div>
+
+<div className={styles.section}>
+
+<SectionTitle>Logging Settings</SectionTitle>
+
+<ConfigSection
+  title="Log Level"
+>
+
+Controls log detail level. Lower levels include all higher-level messages.
+
+</ConfigSection>
+
+<ConfigSection
+  title="Rolling Size (MB)"
+>
+
+Maximum log file size before creating a new file. Larger values mean fewer files but bigger individual file sizes.
+
+</ConfigSection>
+
+<ConfigSection
+  title="Retained File Count"
+>
+
+Number of non-archived log files to keep. Older files are removed or archived based on your settings.
+
+</ConfigSection>
+
+<ConfigSection
+  title="Time Limit"
+>
+
+Maximum age for non-archived logs. Older files are removed or archived based on your settings.
+
+</ConfigSection>
+
+<ConfigSection
+  title="Archive Enabled"
+>
+
+Archive old log files instead of deleting them. Preserves history while reducing disk usage through compression.
+
+<Note>
+Recommended if Cleanuparr generates many logs on your setup.
+</Note>
+
+</ConfigSection>
+
+<ConfigSection
+  title="Archive Retained Count"
+>
+
+Number of archived log files to keep. Older archives are deleted.
+
+</ConfigSection>
+
+<ConfigSection
+  title="Archive Time Limit"
+>
+
+Maximum age for archived logs before deletion.
+
+</ConfigSection>
+
+</div>
+
+</div>

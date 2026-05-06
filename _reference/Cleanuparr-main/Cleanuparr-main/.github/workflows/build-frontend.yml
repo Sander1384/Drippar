@@ -1,0 +1,52 @@
+name: Build Frontend
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Git ref to checkout (branch, tag, or SHA). Defaults to github.ref_name.'
+        type: string
+        required: false
+        default: ''
+
+jobs:
+  build-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get vault secrets
+        uses: hashicorp/vault-action@v2
+        with:
+          url: ${{ secrets.VAULT_HOST }}
+          method: approle
+          roleId: ${{ secrets.VAULT_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_SECRET_ID }}
+          secrets:
+            secrets/data/github repo_readonly_pat | REPO_READONLY_PAT
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        timeout-minutes: 1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ inputs.ref || github.ref_name }}
+          token: ${{ env.REPO_READONLY_PAT }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: code/frontend/package-lock.json
+
+      - name: Build frontend
+        run: |
+          cd code/frontend
+          npm ci
+          npm run build
+
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: code/frontend/dist/ui/browser
+          retention-days: 1

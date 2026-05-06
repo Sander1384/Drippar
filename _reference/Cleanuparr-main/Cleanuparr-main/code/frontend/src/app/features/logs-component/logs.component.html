@@ -1,0 +1,158 @@
+<app-page-header
+  title="Logs"
+  subtitle="View application logs and activity"
+/>
+
+<div class="page-content">
+  <!-- Toolbar -->
+  <div class="toolbar" stickyAware>
+    <div class="toolbar__filters">
+      <app-select
+        placeholder="All Levels"
+        [options]="levelOptions"
+        [(value)]="selectedLevel"
+      />
+      <app-select
+        placeholder="All Categories"
+        [options]="categoryOptions()"
+        [(value)]="selectedCategory"
+      />
+      <app-select
+        placeholder="All Jobs"
+        [options]="jobNameOptions()"
+        [(value)]="selectedJobName"
+      />
+      <app-input
+        placeholder="Search logs..."
+        type="search"
+        [(value)]="searchQuery"
+      />
+    </div>
+    <div class="toolbar__actions">
+      <app-badge [severity]="connected() ? 'success' : 'error'" size="sm" [rounded]="true">
+        {{ connected() ? 'Connected' : 'Disconnected' }}
+      </app-badge>
+      <app-button variant="ghost" size="sm" (clicked)="refreshLogs()">
+        Refresh
+      </app-button>
+      <app-button variant="ghost" size="sm" (clicked)="copyAllLogs()">
+        Copy All
+      </app-button>
+      <div class="export-wrapper">
+        <app-button variant="ghost" size="sm" (clicked)="showExportMenu.set(!showExportMenu())">
+          <ng-icon name="tablerFileExport" />
+          Export
+        </app-button>
+        @if (showExportMenu()) {
+          <div class="export-menu">
+            <button class="export-menu__item" (click)="exportLogs('json')">JSON</button>
+            <button class="export-menu__item" (click)="exportLogs('csv')">CSV</button>
+            <button class="export-menu__item" (click)="exportLogs('text')">Text</button>
+          </div>
+        }
+      </div>
+      <app-button variant="ghost" size="sm" (clicked)="clearLogs()">
+        Clear
+      </app-button>
+    </div>
+  </div>
+
+  <!-- Active Job Run Filter -->
+  @if (selectedJobRunId()) {
+    <div class="active-filter">
+      <span>Showing logs for job run: {{ selectedJobRunId() }}</span>
+      <app-button variant="ghost" size="sm" (clicked)="clearJobRunFilter()">
+        Clear filter
+      </app-button>
+    </div>
+  }
+
+  <!-- Log Count -->
+  <div class="log-count" appScrollReveal>
+    <app-animated-counter [value]="filteredLogs().length" [duration]="400" /> logs
+  </div>
+
+  <!-- Log Entries -->
+  <app-card [noPadding]="true" appScrollReveal>
+    <div class="log-console">
+      @for (log of filteredLogs(); track $index) {
+        <div
+          class="log-entry"
+          [class.log-entry--expanded]="expandedIndex() === $index"
+        >
+          <div
+            class="log-entry__row"
+            [class.log-entry__row--expandable]="isExpandable(log)"
+            (click)="isExpandable(log) ? toggleExpand($index) : null"
+          >
+            <button class="log-entry__copy" (click)="copyLog(log); $event.stopPropagation()" title="Copy log">
+              <ng-icon name="tablerCopy" />
+            </button>
+            <span class="log-entry__time">{{ log.timestamp | date:'yyyy-MM-dd HH:mm:ss' }}</span>
+            <app-badge [severity]="logSeverity(log.level)" size="sm">
+              {{ logLevelLabel(log.level) }}
+            </app-badge>
+            @if (log.jobName) {
+              <app-badge severity="default" size="sm">{{ jobDisplayName(log.jobName) }}</app-badge>
+            }
+            @if (log.category && log.category !== 'SYSTEM') {
+              <app-badge severity="info" size="sm">{{ log.category }}</app-badge>
+            }
+            @if (log.downloadClientType) {
+              <app-badge severity="accent" size="sm">{{ log.downloadClientType }}</app-badge>
+            }
+            @if (isExpandable(log)) {
+              <ng-icon
+                [name]="expandedIndex() === $index ? 'tablerChevronUp' : 'tablerChevronDown'"
+                class="log-entry__chevron"
+              />
+            }
+          </div>
+          <div class="log-entry__message">{{ log.message }}</div>
+          @if (expandedIndex() === $index) {
+            <div class="log-entry__details">
+              @if (log.exception) {
+                <div class="log-entry__exception">
+                  <span class="log-entry__detail-label">Exception</span>
+                  <pre class="log-entry__pre">{{ log.exception }}</pre>
+                </div>
+              }
+              @if (log.jobName) {
+                <div class="log-entry__detail">
+                  <span class="log-entry__detail-label">Job</span>
+                  <span>{{ log.jobName }}</span>
+                </div>
+              }
+              @if (log.instanceName) {
+                <div class="log-entry__detail">
+                  <span class="log-entry__detail-label">Instance</span>
+                  <span>{{ log.instanceName }}</span>
+                </div>
+              }
+              @if (log.downloadClientType) {
+                <div class="log-entry__detail">
+                  <span class="log-entry__detail-label">Download Client</span>
+                  <span>{{ log.downloadClientType }}{{ log.downloadClientName ? ' \u2014 ' + log.downloadClientName : '' }}</span>
+                </div>
+              }
+              @if (log.jobRunId) {
+                <div class="log-entry__detail">
+                  <span class="log-entry__detail-label">Job Run</span>
+                  <button class="log-entry__run-id" (click)="filterByJobRunId(log.jobRunId!); $event.stopPropagation()">
+                    {{ log.jobRunId }}
+                  </button>
+                </div>
+              }
+            </div>
+          }
+        </div>
+      } @empty {
+        <app-empty-state
+          icon="tablerFileText"
+          heading="No logs"
+          [description]="connected() ? 'No log entries match your filters.' : 'Connecting to the server...'"
+        />
+      }
+    </div>
+  </app-card>
+</div>

@@ -1,0 +1,32 @@
+{
+  "app": {
+    "setupComplete": true,
+    "intervalMinutes": 60,
+    "maxItemsPerRun": 1,
+    "workerEnabled": false,
+    "dripMode": "sync",
+    "tmdbImporterEnabled": true,
+    "imdbImporterEnabled": true,
+    "onboardingDismissed": true
+  },
+  "radarr": {
+    "enabled": true,
+    "url": "http://mock-radarr:8787",
+    "apiKey": "test",
+    "qualityProfileId": 1,
+    "rootFolderPath": "/movies",
+    "minimumAvailability": "released",
+    "searchOnAdd": true
+  },
+  "sonarr": {
+    "enabled": false,
+    "url": "",
+    "apiKey": "",
+    "qualityProfileId": 1,
+    "rootFolderPath": "/tv",
+    "languageProfileId": 1,
+    "seasonFolder": true,
+    "searchOnAdd": true
+  },
+  "lists": []
+}

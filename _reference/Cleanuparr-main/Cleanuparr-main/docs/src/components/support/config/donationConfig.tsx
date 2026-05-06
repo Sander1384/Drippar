@@ -1,0 +1,135 @@
+import React from 'react';
+import {
+  IconHeart,
+  IconCoffee,
+  IconCurrencyBitcoin,
+  IconCurrencyEthereum,
+  IconStar,
+  IconBug,
+  IconMessageCircle,
+  IconSpeakerphone,
+  IconCode,
+  IconBook,
+} from '@tabler/icons-react';
+
+export interface DonationMethod {
+  id: string;
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  buttonText: string;
+  url?: string;
+  featured?: boolean;
+  accentColor: string;
+  type: 'link' | 'modal';
+}
+
+export interface CryptoCurrency {
+  id: string;
+  name: string;
+  symbol: string;
+  icon: React.ReactNode;
+  address: string;
+  color: string;
+}
+
+export interface AlternativeSupport {
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  link?: string;
+  linkText?: string;
+}
+
+export const donationMethods: DonationMethod[] = [
+  {
+    id: 'github',
+    title: 'GitHub Sponsors',
+    description: 'Support us through GitHub Sponsors with monthly or one-time contributions. This helps us maintain and improve Cleanuparr.',
+    icon: <IconHeart size={24} stroke={1.5} />,
+    buttonText: 'Sponsor on GitHub',
+    url: 'https://github.com/sponsors/Cleanuparr',
+    featured: true,
+    accentColor: 'var(--support-github)',
+    type: 'link'
+  },
+  {
+    id: 'buymeacoffee',
+    title: 'Buy Me A Coffee',
+    description: 'Support us with a coffee! Quick and easy one-time donations to fuel our development efforts.',
+    icon: <IconCoffee size={24} stroke={1.5} />,
+    buttonText: 'Buy Me A Coffee',
+    url: 'https://buymeacoffee.com/flaminel',
+    accentColor: 'var(--support-buymeacoffee)',
+    type: 'link'
+  },
+  {
+    id: 'crypto',
+    title: 'Cryptocurrency',
+    description: 'Support us with Bitcoin, Ethereum, or other cryptocurrencies. Decentralized donations welcome!',
+    icon: <IconCurrencyBitcoin size={24} stroke={1.5} />,
+    buttonText: 'View Crypto Options',
+    accentColor: 'var(--support-crypto)',
+    type: 'modal'
+  }
+];
+
+export const cryptoCurrencies: CryptoCurrency[] = [
+  {
+    id: 'bitcoin',
+    name: 'Bitcoin',
+    symbol: 'BTC',
+    icon: <IconCurrencyBitcoin size={20} stroke={1.5} />,
+    address: '36dmTE24ovkLMR2SAevf6jsVS3XHZSgRTk',
+    color: '#f7931a'
+  },
+  {
+    id: 'ethereum',
+    name: 'Ethereum',
+    symbol: 'ETH',
+    icon: <IconCurrencyEthereum size={20} stroke={1.5} />,
+    address: '0xB71b3B1Cc801DcAF76DB7855927dd68A4D310357',
+    color: '#627eea'
+  }
+];
+
+export const alternativeSupport: AlternativeSupport[] = [
+  {
+    title: 'Star on GitHub',
+    description: 'Give us a star on GitHub to help increase visibility and show your support.',
+    icon: <IconStar size={20} stroke={1.5} />,
+    link: 'https://github.com/Cleanuparr/Cleanuparr',
+    linkText: 'Star the Repository'
+  },
+  {
+    title: 'Report Bugs',
+    description: 'Help improve Cleanuparr by reporting bugs and issues you encounter.',
+    icon: <IconBug size={20} stroke={1.5} />,
+    link: 'https://github.com/Cleanuparr/Cleanuparr/issues',
+    linkText: 'Report an Issue'
+  },
+  {
+    title: 'Join Discord',
+    description: 'Join our Discord community to help other users and participate in discussions.',
+    icon: <IconMessageCircle size={20} stroke={1.5} />,
+    link: 'https://discord.gg/SCtMCgtsc4',
+    linkText: 'Join Discord'
+  },
+  {
+    title: 'Share the Project',
+    description: 'Help spread the word about Cleanuparr by sharing it with friends and communities.',
+    icon: <IconSpeakerphone size={20} stroke={1.5} />
+  },
+  {
+    title: 'Contribute Code',
+    description: 'Submit pull requests to help improve the codebase and add new features.',
+    icon: <IconCode size={20} stroke={1.5} />,
+    link: 'https://github.com/Cleanuparr/Cleanuparr/pulls',
+    linkText: 'View Pull Requests'
+  },
+  {
+    title: 'Write Documentation',
+    description: 'Help improve our documentation to make Cleanuparr easier to use for everyone.',
+    icon: <IconBook size={20} stroke={1.5} />
+  }
+];

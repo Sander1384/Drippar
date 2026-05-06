@@ -1,0 +1,36 @@
+@if (label()) {
+  <label class="input-label">
+    {{ label() }}
+    @if (helpKey()) {
+      <button type="button" class="field-help-btn" (click)="onHelpClick($event)" [attr.aria-label]="'Open documentation for ' + label()">
+        <ng-icon name="tablerQuestionMark" size="14" />
+      </button>
+    }
+  </label>
+}
+<div class="input-wrapper">
+  <input
+    #inputEl
+    class="input-field"
+    [class.input-field--error]="error()"
+    [class.input-field--has-eye]="hasEye()"
+    [type]="effectiveType()"
+    [placeholder]="placeholder()"
+    [disabled]="disabled()"
+    [readOnly]="readonly()"
+    [(ngModel)]="value"
+    (blur)="blurred.emit($event)"
+    (keydown.enter)="entered.emit()"
+    (search)="onSearchCleared($event)"
+  />
+  @if (hasEye()) {
+    <button type="button" class="input-eye-btn" (click)="toggleSecret($event)" [attr.aria-label]="showSecret() ? 'Hide password' : 'Show password'">
+      <ng-icon [name]="showSecret() ? 'tablerEyeOff' : 'tablerEye'" size="16" />
+    </button>
+  }
+</div>
+@if (error()) {
+  <span class="input-error">{{ error() }}</span>
+} @else if (hint()) {
+  <span class="input-hint">{{ hint() }}</span>
+}

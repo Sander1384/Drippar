@@ -1,0 +1,127 @@
+<div align="center">
+
+_Love this project? Give it a ⭐️ and let others know!_
+
+# <img width="24px" src="./Logo/256.png" alt="Cleanuparr"></img> Cleanuparr
+
+_/kliː.nʌp.ər/ — like "cleanuper", someone who does the cleanup. Not "CleanupArr" or "CleanUpArr"._
+
+![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fcleanuparr-status.pages.dev%2Fstatus.json&query=%24.version&logo=git&label=version&color=blue)
+![Total Downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fghcr-badge.elias.eu.org%2Fapi%2FCleanuparr%2FCleanuparr%2Fcleanuparr&query=%24.downloadCount&style=flat&logo=docker&label=Total%20Downloads&color=blue)
+[![Tests](https://github.com/Cleanuparr/Cleanuparr/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/Cleanuparr/Cleanuparr/actions/workflows/test.yml)
+
+
+[![Discord](https://img.shields.io/discord/1306721212587573389?color=7289DA&label=Discord&style=for-the-badge&logo=discord)](https://discord.gg/SCtMCgtsc4)
+
+</div>
+
+Cleanuparr is an advanced download manager for the Servarr ecosystem. It works with Sonarr, Radarr, Lidarr, Readarr, and Whisparr alongside download clients like qBittorrent, Transmission, and Deluge. Beyond cleaning up stalled, blocked, and malicious downloads, it searches for missing content and quality upgrades, manages seeding, and removes orphaned files.
+
+Cleanuparr was created primarily to address malicious files, such as `*.lnk` or `*.zipx`, that were getting stuck in Sonarr/Radarr and required manual intervention. Some of the reddit posts that made Cleanuparr come to life can be found [here](https://www.reddit.com/r/sonarr/comments/1gqnx16/psa_sonarr_downloaded_a_virus/), [here](https://www.reddit.com/r/sonarr/comments/1gqwklr/sonar_downloaded_a_mkv_file_which_looked_like_a/), [here](https://www.reddit.com/r/sonarr/comments/1gpw2wa/downloaded_waiting_to_import/) and [here](https://www.reddit.com/r/sonarr/comments/1gpi344/downloads_not_importing_no_files_found/).
+
+> [!IMPORTANT]
+> **Features:**
+> - Strike system to mark bad downloads.
+> - Remove and block downloads that reached a maximum number of strikes.
+> - Remove and block downloads that are **failing to be imported** by the arrs.
+> - Remove and block downloads that are **stalled** or in **metadata downloading** state.
+> - Remove and block downloads that have a **low download speed** or **high estimated completion time**.
+> - Remove and block downloads blocked by qBittorrent or by Cleanuparr's **Malware Blocker**.
+> - Remove and block known malware based on patterns found by the community.
+> - Automatically trigger a search for downloads removed from the arrs.
+> - Proactively search for **missing** items across your Radarr and Sonarr libraries.
+> - Search for **quality upgrades** for items that haven't met their quality profile's cutoff (a.k.a. **Cutoff Unmet**).
+> - Search for **custom format score upgrades** with automatic score tracking.
+> - Clean up downloads that have been **seeding** for a certain amount of time.
+> - Remove downloads that are **orphaned**/have no **hardlinks**/are not referenced by the arrs anymore (with [cross-seed](https://www.cross-seed.org/) support).
+> - Notify on strike or download removal.
+> - Ignore certain torrent hashes, categories, tags or trackers from being processed by Cleanuparr.
+
+## Sponsored by GitAds
+[![Sponsored by GitAds](https://gitads.dev/v1/ad-serve?source=cleanuparr/cleanuparr@github)](https://gitads.dev/v1/ad-track?source=cleanuparr/cleanuparr@github)
+
+## Screenshots
+
+https://cleanuparr.github.io/Cleanuparr/docs/screenshots
+
+## 🎯 Supported Applications
+
+### *Arr Applications (latest version)
+- **Sonarr**
+- **Radarr**
+- **Lidarr**
+- **Readarr**
+- **Whisparr v2**
+- **Whisparr v3**
+
+### Download Clients (latest version)
+- **qBittorrent**
+- **Transmission**
+- **Deluge**
+- **µTorrent**
+- **rTorrent**
+
+### Platforms
+- **Docker**
+- **Windows**
+- **macOS**
+- **Linux**
+- **Unraid**
+
+## 🚀 Quick Start
+
+```bash
+docker run -d --name cleanuparr \
+  --restart unless-stopped \
+  -p 11011:11011 \
+  -v /path/to/config:/config \
+  -e PORT=11011 \
+  -e PUID=1000 \
+  -e PGID=1000 \
+  -e TZ=Etc/UTC \
+  ghcr.io/cleanuparr/cleanuparr:latest
+```
+
+For Docker Compose, health checks, and other installation methods, see the [Complete Installation Guide](https://cleanuparr.github.io/Cleanuparr/docs/installation/detailed), but not before reading the [Prerequisites](https://cleanuparr.github.io/Cleanuparr/docs/installation/).
+
+> Prefer not to self-host? A managed Cleanuparr instance is available via [ElfHosted](https://store.elfhosted.com/product-category/personal-stacks/?utm_source=github&utm_medium=readme&utm_campaign=cleanuparr-readme), bundled alongside Sonarr/Radarr to keep your queues tidy (7-day trial).
+
+### 🌐 Access the Web Interface
+
+After installation, open your browser and navigate to:
+```
+http://localhost:11011
+```
+
+**Next Steps:** Check out the [📖 Complete Documentation](https://cleanuparr.github.io/Cleanuparr/) for detailed configuration guides and setup instructions.
+
+## 📖 Documentation & Support
+
+- **📚 [Complete Documentation](https://cleanuparr.github.io/Cleanuparr/)** - Installation guides, configuration, and troubleshooting
+- **⚙️ [Configuration Guide](https://cleanuparr.github.io/Cleanuparr/docs/category/configuration)** - Set up download clients, *arr apps, and features
+- **🔧 [Setup Scenarios](https://cleanuparr.github.io/Cleanuparr/docs/category/setup-scenarios)** - Common use cases and examples
+- **💬 [Discord Community](https://discord.gg/SCtMCgtsc4)** - Get help and discuss with other users
+- **🔗 [GitHub Releases](https://github.com/Cleanuparr/Cleanuparr/releases)** - Download binaries and view changelog
+
+## 🤝 Contributing
+
+We welcome contributions from the community! Whether it's bug fixes, new features, documentation improvements, or testing, your help is appreciated.
+
+**Before contributing:** Please read our [Contributing Guide](CONTRIBUTING.md) and announce your intent to work on an issue before starting.
+
+- **[Contributing Guide](CONTRIBUTING.md)** - Learn how to set up your development environment and submit contributions
+- **[Report Issues](https://github.com/Cleanuparr/Cleanuparr/issues/new/choose)** - Found a bug? Let us know!
+- **[Feature Requests](https://github.com/Cleanuparr/Cleanuparr/issues/new/choose)** - Share your ideas for new features
+- **[Help Test Features](https://discord.gg/SCtMCgtsc4)** - Join Discord to test pre-release features and provide feedback
+
+# Credits
+Special thanks for inspiration go to:
+- [ThijmenGThN/swaparr](https://github.com/ThijmenGThN/swaparr)
+- [ManiMatter/decluttarr](https://github.com/ManiMatter/decluttarr)
+- [PaeyMoopy/sonarr-radarr-queue-cleaner](https://github.com/PaeyMoopy/sonarr-radarr-queue-cleaner)
+- [Sonarr](https://github.com/Sonarr/Sonarr) & [Radarr](https://github.com/Radarr/Radarr)
+
+# Buy me a coffee
+If I made your life just a tiny bit easier, consider buying me a coffee!
+
+<a href="https://buymeacoffee.com/flaminel" target="_blank"><img src="https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png" alt="Buy Me A Coffee" style="height: 41px !important;width: 174px !important;box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;-webkit-box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;" ></a>

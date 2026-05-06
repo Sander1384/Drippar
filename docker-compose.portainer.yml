@@ -1,0 +1,17 @@
+version: "3.9"
+
+services:
+  driparr:
+    image: ghcr.io/sander1384/seerrdripfeed:latest
+    container_name: driparr
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      TZ: Europe/Amsterdam
+      DRIPARR_ADMIN_USERNAME: admin
+      DRIPARR_ADMIN_PASSWORD: "CHANGE_ME_STRONG_PASSWORD"
+      DRIPARR_SESSION_SECRET: "CHANGE_ME_RANDOM_SECRET"
+    volumes:
+      # Pas dit pad aan naar jouw NAS pad
+      - /volume1/docker/driparr/data:/app/data

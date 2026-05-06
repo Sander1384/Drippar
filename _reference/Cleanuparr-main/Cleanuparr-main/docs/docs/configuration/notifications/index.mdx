@@ -1,0 +1,120 @@
+---
+sidebar_position: 7
+---
+
+import {
+  ConfigSection,
+  ElementNavigator,
+  SectionTitle,
+  styles
+} from '@site/src/components/documentation';
+
+# Notifications
+
+Configure notification services to receive alerts about Cleanuparr operations.
+
+<ElementNavigator />
+
+<div className={styles.documentationPage}>
+
+<div className={styles.section}>
+
+<SectionTitle>General Settings</SectionTitle>
+
+<ConfigSection
+  title="Enabled"
+>
+
+Enable or disable this notification provider. If enabled, notifications will be sent according to the configured event triggers.
+
+</ConfigSection>
+
+<ConfigSection
+  title="Provider Name"
+>
+
+A unique name to identify this provider. This name will be displayed in the user interface and logs.
+
+</ConfigSection>
+
+</div>
+
+<div className={styles.section}>
+
+<SectionTitle>Event Configuration</SectionTitle>
+
+<ConfigSection
+  title="Failed Import Strike"
+  icon="x"
+>
+
+**Triggered When**: A download receives a strike for failed import.
+
+</ConfigSection>
+
+<ConfigSection
+  title="Stalled Strike"
+  icon="player-pause"
+>
+
+**Triggered When**: A download receives a strike for being stalled.
+
+</ConfigSection>
+
+<ConfigSection
+  title="Slow Strike"
+  icon="gauge"
+>
+
+**Triggered When**: A download receives a strike for slow speed.
+
+</ConfigSection>
+
+<ConfigSection
+  title="Queue Item Deleted"
+  icon="trash"
+>
+
+**Triggered When**: A download is removed from an arr queue.
+
+</ConfigSection>
+
+<ConfigSection
+  title="Download Cleaned"
+  icon="sparkles"
+>
+
+**Triggered When**: Download Cleaner removes completed downloads.
+
+</ConfigSection>
+
+<ConfigSection
+  title="Category Changed"
+  icon="tag"
+>
+
+**Triggered When**: Download Cleaner changes a download's category.
+
+</ConfigSection>
+
+<ConfigSection
+  title="Search Triggered"
+  icon="search"
+>
+
+**Triggered When**: The Seeker triggers a search for a missing or removed item.
+
+</ConfigSection>
+
+<ConfigSection
+  title="Search Item Grabbed"
+  icon="inbox"
+>
+
+**Triggered When**: A search results in downloads being grabbed and queued.
+
+</ConfigSection>
+
+</div>
+
+</div>

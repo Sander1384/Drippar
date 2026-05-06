@@ -1,0 +1,27 @@
+﻿services:
+  mock-radarr:
+    image: python:3.12-alpine
+    container_name: driparr-mock-radarr
+    working_dir: /app
+    command: ["python", "scripts/mock_radarr.py"]
+    volumes:
+      - ./:/app
+    ports:
+      - "8787:8787"
+
+  driparr-test:
+    build:
+      context: .
+    container_name: driparr-test
+    restart: unless-stopped
+    ports:
+      - "8090:8080"
+    environment:
+      TZ: Europe/Amsterdam
+      DRIPARR_ADMIN_USERNAME: admin
+      DRIPARR_ADMIN_PASSWORD: admin
+      DRIPARR_SESSION_SECRET: test-secret-change-me
+    volumes:
+      - ./data-test:/app/data
+    depends_on:
+      - mock-radarr
