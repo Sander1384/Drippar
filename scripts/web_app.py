@@ -236,20 +236,38 @@ def imdb_ids_from_url(url):
     return list(dict.fromkeys(found))
 
 
-def imdb_ids_from_csv_text(csv_text):
-    ids = []
+def imdb_entries_from_csv_text(csv_text, media_type="movie"):
+    entries = []
     try:
         reader = csv.DictReader(csv_text.splitlines())
         for row in reader:
             const_value = (row.get("Const") or row.get("const") or "").strip()
+            title = (
+                row.get("Title")
+                or row.get("title")
+                or row.get("Primary Title")
+                or row.get("primaryTitle")
+                or row.get("Name")
+                or row.get("name")
+                or ""
+            ).strip()
+            year = (row.get("Year") or row.get("year") or "").strip()
+            if title and year and year.isdigit():
+                title = f"{title} ({year})"
             if re.fullmatch(r"tt\d{7,9}", const_value):
-                ids.append(const_value)
+                entries.append({"id": const_value, "title": title or f"{media_type.upper()} {const_value}"})
                 continue
             url_value = (row.get("URL") or row.get("url") or "").strip()
-            ids.extend(imdb_ids_from_text(url_value))
+            for found_id in imdb_ids_from_text(url_value):
+                entries.append({"id": found_id, "title": title or f"{media_type.upper()} {found_id}"})
     except Exception:
-        ids.extend(imdb_ids_from_text(csv_text))
-    return list(dict.fromkeys(ids))
+        for found_id in imdb_ids_from_text(csv_text):
+            entries.append({"id": found_id, "title": f"{media_type.upper()} {found_id}"})
+    unique = {}
+    for entry in entries:
+        if entry["id"] not in unique:
+            unique[entry["id"]] = entry
+    return list(unique.values())
 
 
 def enqueue_ids(config, media_type, id_kind, ids, source_name):
@@ -261,7 +279,15 @@ def enqueue_ids(config, media_type, id_kind, ids, source_name):
     can_check_sonarr = bool(sonarr_cfg.get("url") and sonarr_cfg.get("apiKey"))
 
     added = 0
-    for external_id in ids:
+    for raw in ids:
+        if isinstance(raw, dict):
+            external_id = str(raw.get("id", "")).strip()
+            display_title = str(raw.get("title", "")).strip()
+        else:
+            external_id = str(raw).strip()
+            display_title = ""
+        if not external_id:
+            continue
         key = (media_type, f"{id_kind}:{external_id}")
         if key in existing:
             continue
@@ -287,7 +313,7 @@ def enqueue_ids(config, media_type, id_kind, ids, source_name):
             {
                 "type": media_type,
                 "externalId": f"{id_kind}:{external_id}",
-                "title": f"{media_type.upper()} {external_id}",
+                "title": display_title or f"{media_type.upper()} {external_id}",
                 "status": status,
                 "source": source_name,
                 "addedAt": "",
@@ -463,12 +489,12 @@ def discover_radarr_options(service):
     }
 
 
-def process_once():
+def process_once(force=False):
     config = read_config()
     rows = read_queue()
     drip_mode = config["app"].get("dripMode", "sync")
 
-    if drip_mode == "sync":
+    if drip_mode == "sync" and not force:
         last_added = None
         for row in rows:
             if row.get("status") == "added":
@@ -765,6 +791,10 @@ def page(config, queue):
         f"<li><span>{html.escape(r['title'])}</span><small>{html.escape(r.get('error','Already in library'))}</small></li>"
         for r in skipped[:12]
     ) or "<li><span>Geen bestaande films gedetecteerd</span><small>Alles klaar om te drippen</small></li>"
+    list_rows = "\n".join(
+        f"<tr><td>{i + 1}</td><td>{html.escape(item.get('name',''))}</td><td>{html.escape(item.get('type',''))}</td><td>{html.escape(item.get('mediaType',''))}</td><td>{html.escape(item.get('url','CSV import'))}</td><td><button class='btn danger' onclick='deleteList({i})'>Delete</button></td></tr>"
+        for i, item in enumerate(config.get("lists", []))
+    ) or "<tr><td colspan='6' style='color:#a49ac2'>Nog geen opgeslagen lijsten</td></tr>"
     return f"""<!doctype html><html lang=\"nl\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Driparr</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&display=swap');
@@ -920,7 +950,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 </div>
 <div class=\"panel\"><h3 style=\"margin-top:0\" data-i18n=\"already_library\">Already in Library</h3><p class=\"sub\" data-i18n=\"already_library_sub\">Automatisch overgeslagen om duplicaten te voorkomen.</p><div class=\"feed-list\"><ul>{skipped_rows}</ul></div></div>
 </section>
-<section id=\"lists\" class=\"tab\"><h1>Lists</h1><p class=\"sub\">Voeg een lijst URL toe of importeer een IMDb CSV.</p><div class=\"panel\"><div class=\"grid\"><div><label>Naam</label><input id=\"listName\" placeholder=\"Mijn lijst\"></div><div><label>Type</label><select id=\"listType\"><option value=\"tmdb\">TMDb</option><option value=\"imdb\">IMDb</option></select></div><div><label>Media</label><select id=\"listMedia\"><option value=\"movie\">Movies</option><option value=\"series\">Series</option></select></div><div><label>URL</label><input id=\"listUrl\" placeholder=\"https://www.imdb.com/list/ls.../\"></div></div><div class=\"actions\"><button class=\"btn\" onclick=\"addList()\">Import URL</button></div></div><div class=\"panel\"><h3 style=\"margin-top:0\">IMDb CSV Import</h3><p class=\"sub\">Upload je IMDb export CSV of plak de inhoud hieronder.</p><div class=\"actions\"><input id=\"imdbCsvFile\" type=\"file\" accept=\".csv,text/csv\" onchange=\"importImdbCsvFile(this)\"><button class=\"btn secondary\" onclick=\"importImdbCsv()\">Import geplakte CSV</button></div><textarea id=\"imdbCsvText\" style=\"width:100%;min-height:150px;background:#120b26;color:#f1ecff;border:1px solid #4d3a86;border-radius:9px;padding:10px;margin-top:10px\" placeholder=\"Plak hier IMDb CSV inhoud...\"></textarea></div></section>
+<section id=\"lists\" class=\"tab\"><h1>Lists</h1><p class=\"sub\">Importeer een IMDb CSV-bestand.</p><div class=\"panel\"><div class=\"grid\"><div><label>Naam</label><input id=\"listName\" placeholder=\"Mijn lijst\"></div><div><label>Media</label><select id=\"listMedia\"><option value=\"movie\">Movies</option><option value=\"series\">Series</option></select></div></div><h3 style=\"margin-top:12px\">IMDb CSV Import</h3><p class=\"sub\">Upload je IMDb export CSV of plak de inhoud hieronder.</p><div class=\"actions\"><input id=\"imdbCsvFile\" type=\"file\" accept=\".csv,text/csv\" onchange=\"importImdbCsvFile(this)\"><button class=\"btn secondary\" onclick=\"importImdbCsv()\">Import geplakte CSV</button></div><textarea id=\"imdbCsvText\" style=\"width:100%;min-height:150px;background:#120b26;color:#f1ecff;border:1px solid #4d3a86;border-radius:9px;padding:10px;margin-top:10px\" placeholder=\"Plak hier IMDb CSV inhoud...\"></textarea></div><div class=\"panel\"><h3 style=\"margin-top:0\">Saved lists</h3><div class=\"queue-wrap\"><table><thead><tr><th>#</th><th>Name</th><th>Type</th><th>Media</th><th>Source</th><th>Action</th></tr></thead><tbody>{list_rows}</tbody></table></div></div></section>
 <section id=\"queue\" class=\"tab\"><h1>Queue</h1><p class=\"sub\">Alle items en status.</p><div class=\"panel\"><div class=\"queue-wrap\"><table><thead><tr><th>Type</th><th>Title</th><th>ID</th><th>Status</th><th>Source</th><th>Reason</th></tr></thead><tbody>{queue_rows}</tbody></table></div></div></section>
 <section id=\"radarr\" class=\"tab\"><h1>Radarr <span>Settings</span></h1><p class=\"sub\">Manage your Radarr instances</p><div class=\"panel\"><div class=\"instance-title\" style=\"margin-bottom:12px\">Instances</div><div class=\"instance-card\"><div><b>Radarr</b> <span class=\"{'enabled-pill' if config['radarr'].get('enabled') else 'disabled-pill'}\">{'Enabled' if config['radarr'].get('enabled') else 'Disabled'}</span> <span style=\"color:#9f92c9;margin-left:10px\">{html.escape(config['radarr'].get('url',''))}</span></div><div class=\"instance-actions\"><button class=\"btn\" onclick=\"openModal('radarrModal')\">Add / Edit Instance</button><button class=\"btn secondary\" onclick=\"testService('radarr')\">Test</button></div></div></div></section>
 <section id=\"sonarr\" class=\"tab\"><h1>Sonarr <span>Settings</span></h1><p class=\"sub\">Manage your Sonarr instances</p><div class=\"panel\"><div class=\"instance-title\" style=\"margin-bottom:12px\">Instances</div><div class=\"instance-card\"><div><b>Sonarr</b> <span class=\"{'enabled-pill' if config['sonarr'].get('enabled') else 'disabled-pill'}\">{'Enabled' if config['sonarr'].get('enabled') else 'Disabled'}</span> <span style=\"color:#9f92c9;margin-left:10px\">{html.escape(config['sonarr'].get('url',''))}</span></div><div class=\"instance-actions\"><button class=\"btn\" onclick=\"openModal('sonarrModal')\">Add / Edit Instance</button><button class=\"btn secondary\" onclick=\"testService('sonarr')\">Test</button></div></div></div></section>
@@ -1143,6 +1173,10 @@ function importImdbCsvFile(input) {{
   }};
   reader.onerror = () => toast('CSV kon niet gelezen worden');
   reader.readAsText(file);
+}}
+function deleteList(index) {{
+  if (!confirm('Weet je zeker dat je deze lijst wilt verwijderen?')) return;
+  post('/api/lists/delete', {{index:index}});
 }}
 function runNow() {{ post('/api/run-now', {{}}); }}
 function dismissOnboarding() {{
@@ -1385,16 +1419,29 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(200, json.dumps({"ok": True, "message": f"{added} items geimporteerd.", "reload": True}), "application/json")
                 return
 
+            if path == "/api/lists/delete":
+                index = int(data.get("index", -1))
+                lists = config.get("lists", [])
+                if index < 0 or index >= len(lists):
+                    raise RuntimeError("Lijst niet gevonden.")
+                removed = lists.pop(index)
+                config["lists"] = lists
+                save_config(config)
+                self.respond(200, json.dumps({"ok": True, "message": f"Lijst verwijderd: {removed.get('name','(zonder naam)')}", "reload": True}), "application/json")
+                return
+
             if path == "/api/import-csv":
                 csv_text = data.get("csvText", "")
                 media_type = data.get("mediaType", "movie")
                 if not csv_text.strip():
                     raise RuntimeError("CSV tekst is leeg.")
-                ids = imdb_ids_from_csv_text(csv_text)
-                if not ids:
+                entries = imdb_entries_from_csv_text(csv_text, media_type=media_type)
+                if not entries:
                     raise RuntimeError("Geen IMDb IDs gevonden in CSV.")
-                added = enqueue_ids(config, media_type, "imdb", ids, data.get("name", "IMDb CSV"))
-                self.respond(200, json.dumps({"ok": True, "message": f"{added} items uit CSV geimporteerd.", "reload": True}), "application/json")
+                added = enqueue_ids(config, media_type, "imdb", entries, data.get("name", "IMDb CSV"))
+                with LOCK:
+                    process_once(force=True)
+                self.respond(200, json.dumps({"ok": True, "message": f"{added} items uit CSV geimporteerd. Eerste drip is gestart.", "reload": True}), "application/json")
                 return
 
             if path == "/api/run-now":
