@@ -959,6 +959,8 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 .worker-toggle-wrap .state-pill {{ padding:2px 9px; border-radius:999px; font-size:12px; font-weight:700; border:1px solid #2f7d58; background:#103523; color:#40dc90; }}
 .worker-toggle-wrap .state-pill.off {{ border-color:#7f3247; background:#3b1622; color:#ff7f96; }}
 .worker-actions {{ display:flex; align-items:center; gap:10px; }}
+.queue-meta {{ margin-left:auto; margin-right:8px; font-size:12px; color:#bfb2e5; }}
+.btn:disabled {{ opacity:.45; cursor:not-allowed; box-shadow:none; }}
 .switch {{ position:relative; display:inline-block; width:44px; height:24px; }}
 .switch-input {{ opacity:0; width:0; height:0; }}
 .switch-slider {{ position:absolute; inset:0; border-radius:999px; background:#372956; border:1px solid #5c4a7a; transition:.2s; }}
@@ -1036,7 +1038,8 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
         </label>
         <small id=\"workerStateText\" class=\"state-pill\" data-i18n=\"worker_state_on\">Start</small>
       </div>
-      <button class=\"btn secondary\" onclick=\"clearQueue()\">Clear all</button>
+      <span class=\"queue-meta\">Queue: {len(queue)} items</span>
+      <button class=\"btn secondary\" onclick=\"clearQueue()\" {'disabled' if len(queue) == 0 else ''}>Clear all</button>
     </div>
   </div>
 </div>

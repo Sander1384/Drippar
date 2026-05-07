@@ -3,10 +3,10 @@ version: "3.9"
 services:
   driparr:
     image: ghcr.io/sander1384/seerrdripfeed:latest
-    container_name: driparr
+    container_name: driparr-app
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "${DRIPARR_PORT:-18080}:8080"
     environment:
       TZ: Europe/Amsterdam
       DRIPARR_ADMIN_USERNAME: admin

@@ -29,7 +29,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-4. Open `http://localhost:8080`.
+4. Open `http://localhost:${DRIPARR_PORT}` (default `18080` in Portainer stack).
 
 ## Portainer / NAS Stack
 
@@ -45,7 +45,7 @@ Gebruik voor Portainer een image-based stack (geen lokale build op je pc).
 - `DRIPARR_SESSION_SECRET`
 - volume pad `/volume1/docker/driparr/data:/app/data`
 6. Plak de inhoud in Portainer bij `Stacks` -> `Add stack` -> `Web editor`.
-7. Deploy stack en open `http://<NAS-IP>:8080`.
+7. Deploy stack en open `http://<NAS-IP>:18080` (of jouw `DRIPARR_PORT`).
 
 ## Browser testomgeving (zonder echte Radarr)
 
