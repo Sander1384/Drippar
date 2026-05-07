@@ -939,6 +939,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 .worker-toggle-wrap small {{ color:#cfc5ec; font-weight:700; }}
 .worker-toggle-wrap .state-pill {{ padding:2px 9px; border-radius:999px; font-size:12px; font-weight:700; border:1px solid #2f7d58; background:#103523; color:#40dc90; }}
 .worker-toggle-wrap .state-pill.off {{ border-color:#7f3247; background:#3b1622; color:#ff7f96; }}
+.worker-actions {{ display:flex; align-items:center; gap:10px; }}
 .switch {{ position:relative; display:inline-block; width:44px; height:24px; }}
 .switch-input {{ opacity:0; width:0; height:0; }}
 .switch-slider {{ position:absolute; inset:0; border-radius:999px; background:#372956; border:1px solid #5c4a7a; transition:.2s; }}
@@ -1008,12 +1009,15 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
   </div>
   <div class=\"actions\" style=\"padding:0 14px 14px\">
     <div class=\"worker-toggle-wrap\">
-      <span data-i18n=\"worker_state_label\">Worker</span>
-      <label class=\"switch\">
-        <input id=\"workerEnabled\" class=\"switch-input\" type=\"checkbox\" {'checked' if worker_enabled else ''} onchange=\"saveGeneral(true)\">
-        <span class=\"switch-slider\"></span>
-      </label>
-      <small id=\"workerStateText\" class=\"state-pill\" data-i18n=\"worker_state_on\">Start</small>
+      <div class=\"worker-actions\">
+        <span data-i18n=\"worker_state_label\">Worker</span>
+        <label class=\"switch\">
+          <input id=\"workerEnabled\" class=\"switch-input\" type=\"checkbox\" {'checked' if worker_enabled else ''} onchange=\"saveGeneral(true)\">
+          <span class=\"switch-slider\"></span>
+        </label>
+        <small id=\"workerStateText\" class=\"state-pill\" data-i18n=\"worker_state_on\">Start</small>
+      </div>
+      <button class=\"btn secondary\" onclick=\"clearQueue()\">Clear all</button>
     </div>
   </div>
 </div>
@@ -1260,6 +1264,10 @@ function importImdbCsvFile(input) {{
 function deleteList(index) {{
   if (!confirm('Weet je zeker dat je deze lijst wilt verwijderen?')) return;
   post('/api/lists/delete', {{index:index}});
+}}
+function clearQueue() {{
+  if (!confirm('Weet je zeker dat je de volledige queue wilt leegmaken?')) return;
+  post('/api/queue/clear', {{}});
 }}
 function runNow() {{ post('/api/run-now', {{}}); }}
 function dismissOnboarding() {{
@@ -1570,6 +1578,12 @@ class Handler(BaseHTTPRequestHandler):
                 with LOCK:
                     process_once()
                 self.respond(200, json.dumps({"ok": True, "message": LAST_RUN["message"], "reload": True}), "application/json")
+                return
+
+            if path == "/api/queue/clear":
+                write_queue([])
+                LAST_RUN.update({"at": utc_now(), "message": "Queue handmatig leeggemaakt."})
+                self.respond(200, json.dumps({"ok": True, "message": "Queue is volledig leeggemaakt.", "reload": True}), "application/json")
                 return
 
             if path == "/api/onboarding-dismiss":
