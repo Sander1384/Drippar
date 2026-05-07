@@ -681,8 +681,8 @@ summary {{ cursor:pointer; color:#c9bcf0; font-weight:700; }}
 <p class=\"hint\">Tip: alleen gebruiken als automatic detect geen folders/profiles vindt.</p>
 </details>
 <div class=\"grid\" style=\"margin-top:12px\">
-<div class=\"switch-row\"><span id=\"lTmdb\">TMDb importer</span><label class=\"switch\"><input class=\"switch-input\" type=\"checkbox\" name=\"tmdbImporterEnabled\" {'checked' if config.get('app',{}).get('tmdbImporterEnabled', True) else ''}><span class=\"switch-slider\"></span></label></div>
-<div class=\"switch-row\"><span id=\"lImdb\">IMDb importer</span><label class=\"switch\"><input class=\"switch-input\" type=\"checkbox\" name=\"imdbImporterEnabled\" {'checked' if config.get('app',{}).get('imdbImporterEnabled', False) else ''}><span class=\"switch-slider\"></span></label></div>
+<div class=\"switch-row\"><span id=\"lTmdb\">TMDb importer</span><label class=\"switch\"><input id=\"setupTmdbEnabled\" class=\"switch-input\" type=\"checkbox\" name=\"tmdbImporterEnabled\" {'checked' if config.get('app',{}).get('tmdbImporterEnabled', True) else ''}><span class=\"switch-slider\"></span></label></div>
+<div class=\"switch-row\"><span id=\"lImdb\">IMDb importer</span><label class=\"switch\"><input id=\"setupImdbEnabled\" class=\"switch-input\" type=\"checkbox\" name=\"imdbImporterEnabled\" {'checked' if config.get('app',{}).get('imdbImporterEnabled', False) else ''}><span class=\"switch-slider\"></span></label></div>
 </div>
 </div>
 {err}
@@ -714,6 +714,19 @@ async function discoverRadarr() {{
 const lang=(navigator.language||'en').toLowerCase().startsWith('nl')?'nl':((navigator.language||'en').toLowerCase().startsWith('de')?'de':'en');
 const t={{en:{{title:'Quick Start Checklist',sub:'Complete this once and you are ready.',api:'Radarr API key *',quality:'Quality Profile ID',root:'Root Folder',tmdb:'TMDb importer',imdb:'IMDb importer',auto:'Automatic detect',finish:'Save setup'}},nl:{{title:'Snelle Start Checklist',sub:'Doorloop dit eenmalig en je bent klaar.',api:'Radarr API key *',quality:'Quality Profile ID',root:'Root Folder',tmdb:'TMDb importer',imdb:'IMDb importer',auto:'Automatic detect',finish:'Opslaan'}},de:{{title:'Quick-Start Checkliste',sub:'Einmal durchgehen und fertig.',api:'Radarr API-Schlüssel *',quality:'Qualitätsprofil-ID',root:'Root-Ordner',tmdb:'TMDb-Importer',imdb:'IMDb-Importer',auto:'Automatisch erkennen',finish:'Speichern'}}}}[lang];
 document.documentElement.lang=lang;setupTitle.textContent=t.title;setupSub.textContent=t.sub;lRadarrApi.textContent=t.api;lQuality.textContent=t.quality;lRoot.textContent=t.root;lTmdb.textContent=t.tmdb;lImdb.textContent=t.imdb;autoBtn.textContent=t.auto;finishBtn.textContent=t.finish;
+const setupTmdb = document.getElementById('setupTmdbEnabled');
+const setupImdb = document.getElementById('setupImdbEnabled');
+function syncSetupSource(from) {{
+  if (!setupTmdb || !setupImdb) return;
+  if (from === 'tmdb' && setupTmdb.checked) setupImdb.checked = false;
+  if (from === 'imdb' && setupImdb.checked) setupTmdb.checked = false;
+  if (!setupTmdb.checked && !setupImdb.checked) setupTmdb.checked = true;
+}}
+if (setupTmdb && setupImdb) {{
+  setupTmdb.addEventListener('change', () => syncSetupSource('tmdb'));
+  setupImdb.addEventListener('change', () => syncSetupSource('imdb'));
+  syncSetupSource('tmdb');
+}}
 </script>
 </body></html>"""
 
@@ -950,11 +963,11 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 </div>
 <div class=\"panel\"><h3 style=\"margin-top:0\" data-i18n=\"already_library\">Already in Library</h3><p class=\"sub\" data-i18n=\"already_library_sub\">Automatisch overgeslagen om duplicaten te voorkomen.</p><div class=\"feed-list\"><ul>{skipped_rows}</ul></div></div>
 </section>
-<section id=\"lists\" class=\"tab\"><h1>Lists</h1><p class=\"sub\">Importeer een IMDb CSV-bestand.</p><div class=\"panel\"><div class=\"grid\"><div><label>Naam</label><input id=\"listName\" placeholder=\"Mijn lijst\"></div><div><label>Media</label><select id=\"listMedia\"><option value=\"movie\">Movies</option><option value=\"series\">Series</option></select></div></div><h3 style=\"margin-top:12px\">IMDb CSV Import</h3><p class=\"sub\">Upload je IMDb export CSV of plak de inhoud hieronder.</p><div class=\"actions\"><input id=\"imdbCsvFile\" type=\"file\" accept=\".csv,text/csv\" onchange=\"importImdbCsvFile(this)\"><button class=\"btn secondary\" onclick=\"importImdbCsv()\">Import geplakte CSV</button></div><textarea id=\"imdbCsvText\" style=\"width:100%;min-height:150px;background:#120b26;color:#f1ecff;border:1px solid #4d3a86;border-radius:9px;padding:10px;margin-top:10px\" placeholder=\"Plak hier IMDb CSV inhoud...\"></textarea></div><div class=\"panel\"><h3 style=\"margin-top:0\">Saved lists</h3><div class=\"queue-wrap\"><table><thead><tr><th>#</th><th>Name</th><th>Type</th><th>Media</th><th>Source</th><th>Action</th></tr></thead><tbody>{list_rows}</tbody></table></div></div></section>
+<section id=\"lists\" class=\"tab\"><h1>Lists</h1><p class=\"sub\">Importeer een IMDb CSV-bestand.</p><div class=\"panel\"><div class=\"grid\"><div><label>Naam *</label><input id=\"listName\" placeholder=\"Mijn lijst\" required><div id=\"listNameError\" class=\"field-error\"></div></div><div><label>Media</label><select id=\"listMedia\"><option value=\"movie\">Movies</option><option value=\"series\">Series</option></select></div></div><h3 style=\"margin-top:12px\">IMDb CSV Import</h3><p class=\"sub\">Upload je IMDb export CSV of plak de inhoud hieronder.</p><div class=\"actions\"><input id=\"imdbCsvFile\" type=\"file\" accept=\".csv,text/csv\" onchange=\"importImdbCsvFile(this)\"><button class=\"btn secondary\" onclick=\"importImdbCsv()\">Import geplakte CSV</button></div><textarea id=\"imdbCsvText\" style=\"width:100%;min-height:150px;background:#120b26;color:#f1ecff;border:1px solid #4d3a86;border-radius:9px;padding:10px;margin-top:10px\" placeholder=\"Plak hier IMDb CSV inhoud...\"></textarea></div><div class=\"panel\"><h3 style=\"margin-top:0\">Saved lists</h3><div class=\"queue-wrap\"><table><thead><tr><th>#</th><th>Name</th><th>Type</th><th>Media</th><th>Source</th><th>Action</th></tr></thead><tbody>{list_rows}</tbody></table></div></div></section>
 <section id=\"queue\" class=\"tab\"><h1>Queue</h1><p class=\"sub\">Alle items en status.</p><div class=\"panel\"><div class=\"queue-wrap\"><table><thead><tr><th>Type</th><th>Title</th><th>ID</th><th>Status</th><th>Source</th><th>Reason</th></tr></thead><tbody>{queue_rows}</tbody></table></div></div></section>
 <section id=\"radarr\" class=\"tab\"><h1>Radarr <span>Settings</span></h1><p class=\"sub\">Manage your Radarr instances</p><div class=\"panel\"><div class=\"instance-title\" style=\"margin-bottom:12px\">Instances</div><div class=\"instance-card\"><div><b>Radarr</b> <span class=\"{'enabled-pill' if config['radarr'].get('enabled') else 'disabled-pill'}\">{'Enabled' if config['radarr'].get('enabled') else 'Disabled'}</span> <span style=\"color:#9f92c9;margin-left:10px\">{html.escape(config['radarr'].get('url',''))}</span></div><div class=\"instance-actions\"><button class=\"btn\" onclick=\"openModal('radarrModal')\">Add / Edit Instance</button><button class=\"btn secondary\" onclick=\"testService('radarr')\">Test</button></div></div></div></section>
 <section id=\"sonarr\" class=\"tab\"><h1>Sonarr <span>Settings</span></h1><p class=\"sub\">Manage your Sonarr instances</p><div class=\"panel\"><div class=\"instance-title\" style=\"margin-bottom:12px\">Instances</div><div class=\"instance-card\"><div><b>Sonarr</b> <span class=\"{'enabled-pill' if config['sonarr'].get('enabled') else 'disabled-pill'}\">{'Enabled' if config['sonarr'].get('enabled') else 'Disabled'}</span> <span style=\"color:#9f92c9;margin-left:10px\">{html.escape(config['sonarr'].get('url',''))}</span></div><div class=\"instance-actions\"><button class=\"btn\" onclick=\"openModal('sonarrModal')\">Add / Edit Instance</button><button class=\"btn secondary\" onclick=\"testService('sonarr')\">Test</button></div></div></div></section>
-<section id=\"general\" class=\"tab\"><h1 data-i18n=\"general\">General</h1><div class=\"panel\"><div class=\"grid\"><div><label data-i18n=\"drip_mode\">Drip mode</label><select id=\"dripMode\"><option value=\"timed\" data-i18n=\"drip_mode_timed\">Timed (op interval)</option><option value=\"sync\" data-i18n=\"drip_mode_sync\">Sync (wacht op completion)</option></select></div><div><label id=\"intervalPresetLabel\" data-i18n=\"drip_interval\">Drip interval</label><select id=\"intervalPreset\" onchange=\"setIntervalFromPreset()\"><option value=\"15\" data-i18n=\"every_15\">Elke 15 minuten</option><option value=\"30\" data-i18n=\"every_30\">Elke 30 minuten</option><option value=\"60\" data-i18n=\"every_60\">Elk uur</option><option value=\"90\" data-i18n=\"every_90\">Elke 1,5 uur</option><option value=\"custom\" data-i18n=\"custom\">Custom</option></select></div><div><label id=\"intervalMinutesLabel\" data-i18n=\"interval_custom\">Interval minuten (custom)</label><input id=\"intervalMinutes\" type=\"number\" value=\"{config['app'].get('intervalMinutes')}\"></div><div><label data-i18n=\"max_items\">Max items per run</label><input id=\"maxItemsPerRun\" type=\"number\" value=\"{config['app'].get('maxItemsPerRun')}\"></div><div><label data-i18n=\"tmdb_import\">TMDb import actief</label><input id=\"tmdbImporterEnabled\" type=\"checkbox\" {'checked' if config['app'].get('tmdbImporterEnabled', True) else ''}></div><div><label data-i18n=\"imdb_import\">IMDb import actief</label><input id=\"imdbImporterEnabled\" type=\"checkbox\" {'checked' if config['app'].get('imdbImporterEnabled', False) else ''}></div><div><label data-i18n=\"language\">Language</label><select id=\"languagePref\"><option value=\"auto\" data-i18n=\"language_auto\">Auto (system)</option><option value=\"en\">English</option><option value=\"nl\">Nederlands</option><option value=\"de\">Deutsch</option></select></div></div><div class=\"actions\"><button class=\"btn\" onclick=\"saveGeneral()\" data-i18n=\"save\">Save</button><button class=\"btn secondary\" onclick=\"showOnboardingAgain()\" data-i18n=\"show_checklist\">Show checklist</button></div></div></section>
+<section id=\"general\" class=\"tab\"><h1 data-i18n=\"general\">General</h1><div class=\"panel\"><div class=\"grid\"><div><label data-i18n=\"drip_mode\">Drip mode</label><select id=\"dripMode\"><option value=\"timed\" data-i18n=\"drip_mode_timed\">Timed (op interval)</option><option value=\"sync\" data-i18n=\"drip_mode_sync\">Sync (wacht op completion)</option></select></div><div><label id=\"intervalPresetLabel\" data-i18n=\"drip_interval\">Drip interval</label><select id=\"intervalPreset\" onchange=\"setIntervalFromPreset()\"><option value=\"15\" data-i18n=\"every_15\">Elke 15 minuten</option><option value=\"30\" data-i18n=\"every_30\">Elke 30 minuten</option><option value=\"60\" data-i18n=\"every_60\">Elk uur</option><option value=\"90\" data-i18n=\"every_90\">Elke 1,5 uur</option><option value=\"custom\" data-i18n=\"custom\">Custom</option></select></div><div><label id=\"intervalMinutesLabel\" data-i18n=\"interval_custom\">Interval minuten (custom)</label><input id=\"intervalMinutes\" type=\"number\" value=\"{config['app'].get('intervalMinutes')}\"></div><div><label data-i18n=\"max_items\">Max items per run</label><input id=\"maxItemsPerRun\" type=\"number\" value=\"{config['app'].get('maxItemsPerRun')}\"></div><div><label data-i18n=\"tmdb_import\">TMDb import actief</label><label class=\"switch\"><input id=\"tmdbImporterEnabled\" class=\"switch-input\" type=\"checkbox\" {'checked' if config['app'].get('tmdbImporterEnabled', True) else ''}><span class=\"switch-slider\"></span></label></div><div><label data-i18n=\"imdb_import\">IMDb import actief</label><label class=\"switch\"><input id=\"imdbImporterEnabled\" class=\"switch-input\" type=\"checkbox\" {'checked' if config['app'].get('imdbImporterEnabled', False) else ''}><span class=\"switch-slider\"></span></label></div><div><label data-i18n=\"language\">Language</label><select id=\"languagePref\"><option value=\"auto\" data-i18n=\"language_auto\">Auto (system)</option><option value=\"en\">English</option><option value=\"nl\">Nederlands</option><option value=\"de\">Deutsch</option></select></div></div><div class=\"actions\"><button class=\"btn\" onclick=\"saveGeneral()\" data-i18n=\"save\">Save</button><button class=\"btn secondary\" onclick=\"showOnboardingAgain()\" data-i18n=\"show_checklist\">Show checklist</button></div></div></section>
 </main></div>
 <div id=\"radarrModal\" class=\"modal-backdrop\"><div class=\"modal-card\"><div class=\"modal-head\"><b>Add Instance</b><button class=\"modal-close\" onclick=\"closeModal('radarrModal')\">×</button></div><div class=\"modal-body\">{settings_form('radarr', config['radarr'], include_actions=False)}</div><div class=\"modal-foot\"><button class=\"btn secondary\" onclick=\"testService('radarr')\">Test</button><button class=\"btn\" onclick=\"saveService('radarr')\">Save</button></div></div></div>
 <div id=\"sonarrModal\" class=\"modal-backdrop\"><div class=\"modal-card\"><div class=\"modal-head\"><b>Add Instance</b><button class=\"modal-close\" onclick=\"closeModal('sonarrModal')\">×</button></div><div class=\"modal-body\">{settings_form('sonarr', config['sonarr'], include_actions=False)}</div><div class=\"modal-foot\"><button class=\"btn secondary\" onclick=\"testService('sonarr')\">Test</button><button class=\"btn\" onclick=\"saveService('sonarr')\">Save</button></div></div></div>
@@ -1162,14 +1175,28 @@ function updateDripModeUI() {{
 (() => {{ dripMode.value = "{config['app'].get('dripMode','sync')}"; updateDripModeUI(); }})();
 dripMode.addEventListener('change', updateDripModeUI);
 function addList() {{ post('/api/lists', {{name:listName.value, type:listType.value, mediaType:listMedia.value, url:listUrl.value}}); }}
-function importImdbCsv() {{ post('/api/import-csv', {{name:listName.value || 'IMDb CSV', mediaType:listMedia.value || 'movie', csvText:imdbCsvText.value}}); }}
+function validateListName() {{
+  const name = (listName.value || '').trim();
+  const err = document.getElementById('listNameError');
+  if (err) err.textContent = '';
+  if (!name) {{
+    if (err) err.textContent = 'Naam is verplicht';
+    return false;
+  }}
+  return true;
+}}
+function importImdbCsv() {{
+  if (!validateListName()) return;
+  post('/api/import-csv', {{name:listName.value.trim(), mediaType:listMedia.value || 'movie', csvText:imdbCsvText.value}});
+}}
 function importImdbCsvFile(input) {{
   const file = input.files && input.files[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = () => {{
     imdbCsvText.value = String(reader.result || '');
-    post('/api/import-csv', {{name:listName.value || file.name || 'IMDb CSV', mediaType:listMedia.value || 'movie', csvText:imdbCsvText.value}});
+    if (!listName.value) listName.value = file.name || 'IMDb CSV';
+    toast('CSV geladen. Klik op "Import geplakte CSV" om te starten.');
   }};
   reader.onerror = () => toast('CSV kon niet gelezen worden');
   reader.readAsText(file);
@@ -1208,6 +1235,16 @@ if (languagePref) {{
 }}
 async function logout() {{ await post('/api/logout', {{}}); location.href='/login'; }}
 applyI18n();
+function enforceSingleSource(from) {{
+  if (from === 'tmdb' && tmdbImporterEnabled.checked) imdbImporterEnabled.checked = false;
+  if (from === 'imdb' && imdbImporterEnabled.checked) tmdbImporterEnabled.checked = false;
+  if (!tmdbImporterEnabled.checked && !imdbImporterEnabled.checked) tmdbImporterEnabled.checked = true;
+}}
+if (typeof tmdbImporterEnabled !== 'undefined' && typeof imdbImporterEnabled !== 'undefined') {{
+  tmdbImporterEnabled.addEventListener('change', () => enforceSingleSource('tmdb'));
+  imdbImporterEnabled.addEventListener('change', () => enforceSingleSource('imdb'));
+  enforceSingleSource('tmdb');
+}}
 (() => {{
   const next = localStorage.getItem('driparr_next_step');
   if (next === 'lists') {{
@@ -1358,8 +1395,14 @@ class Handler(BaseHTTPRequestHandler):
                 if not root_path:
                     raise RuntimeError("Root folder is vereist. Kies een geldige map uit Radarr.")
                 config["radarr"]["rootFolderPath"] = root_path
-                config["app"]["tmdbImporterEnabled"] = form.get("tmdbImporterEnabled", "").strip().lower() in ("true", "on", "1", "yes")
-                config["app"]["imdbImporterEnabled"] = form.get("imdbImporterEnabled", "").strip().lower() in ("true", "on", "1", "yes")
+                tmdb_enabled = form.get("tmdbImporterEnabled", "").strip().lower() in ("true", "on", "1", "yes")
+                imdb_enabled = form.get("imdbImporterEnabled", "").strip().lower() in ("true", "on", "1", "yes")
+                if tmdb_enabled and imdb_enabled:
+                    imdb_enabled = False
+                if not tmdb_enabled and not imdb_enabled:
+                    tmdb_enabled = True
+                config["app"]["tmdbImporterEnabled"] = tmdb_enabled
+                config["app"]["imdbImporterEnabled"] = imdb_enabled
                 config["app"]["setupComplete"] = True
                 config["app"]["onboardingDismissed"] = False
                 save_config(config)
@@ -1402,8 +1445,14 @@ class Handler(BaseHTTPRequestHandler):
                 config["app"]["dripMode"] = data.get("dripMode", "sync")
                 config["app"]["intervalMinutes"] = int(data["intervalMinutes"])
                 config["app"]["maxItemsPerRun"] = int(data["maxItemsPerRun"])
-                config["app"]["tmdbImporterEnabled"] = bool(data.get("tmdbImporterEnabled", True))
-                config["app"]["imdbImporterEnabled"] = bool(data.get("imdbImporterEnabled", False))
+                tmdb_enabled = bool(data.get("tmdbImporterEnabled", True))
+                imdb_enabled = bool(data.get("imdbImporterEnabled", False))
+                if tmdb_enabled and imdb_enabled:
+                    imdb_enabled = False
+                if not tmdb_enabled and not imdb_enabled:
+                    tmdb_enabled = True
+                config["app"]["tmdbImporterEnabled"] = tmdb_enabled
+                config["app"]["imdbImporterEnabled"] = imdb_enabled
                 if "workerEnabled" in data and data.get("workerEnabled") is not None:
                     config["app"]["workerEnabled"] = bool(data.get("workerEnabled"))
                 elif data.get("toggleWorker"):
@@ -1433,12 +1482,24 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/import-csv":
                 csv_text = data.get("csvText", "")
                 media_type = data.get("mediaType", "movie")
+                list_name = str(data.get("name", "")).strip()
+                if not list_name:
+                    raise RuntimeError("Lijstnaam is verplicht.")
                 if not csv_text.strip():
                     raise RuntimeError("CSV tekst is leeg.")
                 entries = imdb_entries_from_csv_text(csv_text, media_type=media_type)
                 if not entries:
                     raise RuntimeError("Geen IMDb IDs gevonden in CSV.")
-                added = enqueue_ids(config, media_type, "imdb", entries, data.get("name", "IMDb CSV"))
+                config.setdefault("lists", []).append(
+                    {
+                        "name": list_name,
+                        "type": "imdb_csv",
+                        "mediaType": media_type,
+                        "url": "CSV import",
+                    }
+                )
+                save_config(config)
+                added = enqueue_ids(config, media_type, "imdb", entries, list_name)
                 with LOCK:
                     process_once(force=True)
                 self.respond(200, json.dumps({"ok": True, "message": f"{added} items uit CSV geimporteerd. Eerste drip is gestart.", "reload": True}), "application/json")
