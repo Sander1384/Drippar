@@ -270,6 +270,42 @@ def imdb_entries_from_csv_text(csv_text, media_type="movie"):
     return list(unique.values())
 
 
+def normalize_title(value):
+    text = str(value or "").lower()
+    text = re.sub(r"\(\d{4}\)", "", text)
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def parse_title_year(value):
+    text = str(value or "").strip()
+    year = None
+    match = re.search(r"\((\d{4})\)\s*$", text)
+    if match:
+        year = int(match.group(1))
+        text = re.sub(r"\(\d{4}\)\s*$", "", text).strip()
+    return normalize_title(text), year
+
+
+def build_radarr_movie_index(config):
+    movies = service_request(config["radarr"], "GET", "/movie")
+    by_tmdb = set()
+    by_imdb = set()
+    by_title_year = set()
+    for movie in movies or []:
+        tmdb_id = movie.get("tmdbId")
+        imdb_id = str(movie.get("imdbId") or "").strip().lower()
+        title_norm = normalize_title(movie.get("title"))
+        year = movie.get("year")
+        if tmdb_id:
+            by_tmdb.add(str(tmdb_id))
+        if re.fullmatch(r"tt\d{7,9}", imdb_id):
+            by_imdb.add(imdb_id)
+        if title_norm and year:
+            by_title_year.add((title_norm, int(year)))
+    return {"tmdb": by_tmdb, "imdb": by_imdb, "title_year": by_title_year}
+
+
 def enqueue_ids(config, media_type, id_kind, ids, source_name):
     rows = read_queue()
     existing = {(row["type"], row["externalId"]) for row in rows}
@@ -277,6 +313,13 @@ def enqueue_ids(config, media_type, id_kind, ids, source_name):
     sonarr_cfg = config.get("sonarr", {})
     can_check_radarr = bool(radarr_cfg.get("url") and radarr_cfg.get("apiKey"))
     can_check_sonarr = bool(sonarr_cfg.get("url") and sonarr_cfg.get("apiKey"))
+
+    radarr_index = None
+    if media_type == "movie" and can_check_radarr:
+        try:
+            radarr_index = build_radarr_movie_index(config)
+        except RuntimeError:
+            radarr_index = None
 
     added = 0
     for raw in ids:
@@ -295,10 +338,23 @@ def enqueue_ids(config, media_type, id_kind, ids, source_name):
         reason = ""
         if media_type == "movie" and can_check_radarr:
             try:
-                tmdb_for_check = external_id if id_kind == "tmdb" else resolve_tmdb_from_imdb(config, external_id)
-                if tmdb_for_check and radarr_has_tmdb(config, int(tmdb_for_check)):
+                imdb_id_for_check = external_id.lower() if id_kind == "imdb" else ""
+                if radarr_index and imdb_id_for_check and imdb_id_for_check in radarr_index["imdb"]:
                     status = "skipped"
-                    reason = "Bestaat al in Radarr (gefilterd bij import)."
+                    reason = "Bestaat al in Radarr op IMDb ID (gefilterd bij import)."
+                if status == "todo":
+                    tmdb_for_check = external_id if id_kind == "tmdb" else resolve_tmdb_from_imdb(config, external_id)
+                    if tmdb_for_check and (
+                        (radarr_index and str(tmdb_for_check) in radarr_index["tmdb"])
+                        or radarr_has_tmdb(config, int(tmdb_for_check))
+                    ):
+                        status = "skipped"
+                        reason = "Bestaat al in Radarr op TMDb ID (gefilterd bij import)."
+                if status == "todo" and display_title and radarr_index:
+                    title_norm, year = parse_title_year(display_title)
+                    if title_norm and year and (title_norm, year) in radarr_index["title_year"]:
+                        status = "skipped"
+                        reason = "Bestaat al in Radarr op titel+jaar (gefilterd bij import)."
             except RuntimeError:
                 pass
         if media_type == "series" and can_check_sonarr:
@@ -1500,9 +1556,14 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 save_config(config)
                 added = enqueue_ids(config, media_type, "imdb", entries, list_name)
-                with LOCK:
-                    process_once(force=True)
-                self.respond(200, json.dumps({"ok": True, "message": f"{added} items uit CSV geimporteerd. Eerste drip is gestart.", "reload": True}), "application/json")
+                worker_enabled = bool(config.get("app", {}).get("workerEnabled"))
+                if worker_enabled:
+                    with LOCK:
+                        process_once(force=True)
+                    message = f"{added} items uit CSV geimporteerd. Eerste drip is gestart."
+                else:
+                    message = f"{added} items uit CSV geimporteerd. Worker staat op pauze, er is nog niets gedript."
+                self.respond(200, json.dumps({"ok": True, "message": message, "reload": True}), "application/json")
                 return
 
             if path == "/api/run-now":
