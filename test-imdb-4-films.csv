@@ -1,0 +1,5 @@
+Const,Your Rating,Date Rated,Title,URL,Title Type,IMDb Rating,Runtime (mins),Year,Genres,Num Votes,Release Date,Directors
+tt0110912,0,,Pulp Fiction,https://www.imdb.com/title/tt0110912/,movie,8.9,154,1994,"Crime, Drama",2200000,1994-10-14,Quentin Tarantino
+tt0133093,0,,The Matrix,https://www.imdb.com/title/tt0133093/,movie,8.7,136,1999,"Action, Sci-Fi",2100000,1999-03-31,Lana Wachowski|Lilly Wachowski
+tt0109830,0,,Forrest Gump,https://www.imdb.com/title/tt0109830/,movie,8.8,142,1994,"Drama, Romance",2300000,1994-07-06,Robert Zemeckis
+tt0167260,0,,The Lord of the Rings: The Return of the King,https://www.imdb.com/title/tt0167260/,movie,9.0,201,2003,"Action, Adventure, Drama",2000000,2003-12-17,Peter Jackson

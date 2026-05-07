@@ -32,6 +32,18 @@ def utc_now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def safe_int(value, default, minimum=None, maximum=None):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = int(default)
+    if minimum is not None:
+        parsed = max(minimum, parsed)
+    if maximum is not None:
+        parsed = min(maximum, parsed)
+    return parsed
+
+
 def parse_iso_datetime(value):
     if not value:
         return None
@@ -794,11 +806,16 @@ def settings_form(name, values, include_actions=True):
         if include_actions
         else ""
     )
+    quality_field = (
+        f"""<div class="service-row"><label>Quality Profile</label><div class="inline-actions"><select id="{name}Quality"><option value="{html.escape(str(values.get('qualityProfileId',1)))}">Current ID {html.escape(str(values.get('qualityProfileId',1)))}</option></select><button class="btn secondary" type="button" onclick="discoverRadarrProfiles()">Refresh profiles</button></div></div>"""
+        if name == "radarr"
+        else f"""<div class="service-row"><label>Quality Profile ID</label><input id="{name}Quality" type="number" value="{html.escape(str(values.get('qualityProfileId',1)))}"></div>"""
+    )
     return f"""<div class="panel service-form"><div class="service-grid">
 <div class="service-row"><label>Enabled</label><label class="switch"><input id="{name}Enabled" class="switch-input" type="checkbox" {checked}><span class="switch-slider"></span></label></div>
 <div class="service-row"><label>URL *</label><input id="{name}Url" value="{html.escape(values.get('url',''))}" placeholder="http://radarr:7878"><div id="{name}UrlError" class="field-error"></div></div>
 <div class="service-row"><label>API key *</label><input id="{name}ApiKey" value="{html.escape(values.get('apiKey',''))}" placeholder="API key"><div id="{name}ApiKeyError" class="field-error"></div></div>
-<div class="service-row"><label>Quality Profile ID</label><input id="{name}Quality" type="number" value="{html.escape(str(values.get('qualityProfileId',1)))}"></div>
+{quality_field}
 <div class="service-row"><label>Root Folder</label><input id="{name}Root" value="{html.escape(values.get('rootFolderPath',''))}" placeholder="/movies"></div>
 </div>{actions}</div>"""
 
@@ -920,6 +937,8 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 .service-form {{ padding:16px; border:1px solid #4b3a79; border-radius:12px; background:linear-gradient(145deg,#22173c,#1a1230); }}
 .service-grid {{ display:grid; grid-template-columns:1fr; gap:6px; }}
 .service-row {{ display:block; }}
+.inline-actions {{ display:flex; gap:8px; align-items:center; }}
+.inline-actions select {{ flex:1; min-width:200px; }}
 .onboarding-list {{ margin:8px 0 0; padding-left:0; color:#d8cfff; line-height:1.6; list-style:none; }}
 .onboarding-list li {{ margin:9px 0; display:flex; align-items:center; gap:10px; justify-content:space-between; }}
 .onboarding-item-left {{ display:flex; align-items:center; gap:10px; }}
@@ -1035,7 +1054,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 <div id=\"toast\" class=\"toast\"></div>
 <script>
 function openTab(tabId) {{ document.querySelectorAll('nav button').forEach(b => b.classList.remove('active')); document.querySelectorAll('.tab').forEach(t => t.classList.remove('active')); const btn = document.querySelector(`nav button[data-tab="${{tabId}}"]`); if (btn) btn.classList.add('active'); const tab = document.getElementById(tabId); if (tab) tab.classList.add('active'); }}
-function openModal(id) {{ const m=document.getElementById(id); if (m) m.classList.add('open'); }}
+function openModal(id) {{ const m=document.getElementById(id); if (m) m.classList.add('open'); if (id === 'radarrModal') discoverRadarrProfiles(); }}
 function closeModal(id) {{ const m=document.getElementById(id); if (m) m.classList.remove('open'); }}
 function detectLanguage() {{
   const pref = localStorage.getItem('driparr_lang_pref') || 'auto';
@@ -1205,7 +1224,34 @@ function applyI18n() {{
 document.querySelectorAll('nav button[data-tab]').forEach(btn => btn.onclick = () => openTab(btn.dataset.tab));
 async function post(url, data) {{ const r = await fetch(url, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify(data)}}); if (r.status===401) {{ location.href='/login'; return; }} const j = await r.json(); toast(j.message || (j.ok ? 'Saved' : 'Error')); if (j.reload) setTimeout(()=>location.reload(), 650); return j; }}
 function toast(msg) {{ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none',3000); }}
-function serviceData(name) {{ return {{url:document.getElementById(name+'Url').value, apiKey:document.getElementById(name+'ApiKey').value, qualityProfileId:Number(document.getElementById(name+'Quality').value), rootFolderPath:document.getElementById(name+'Root').value, enabled:document.getElementById(name+'Enabled').checked}}; }}
+function serviceData(name) {{
+  const qualityEl = document.getElementById(name+'Quality');
+  const qualityProfileId = Number((qualityEl && qualityEl.value) ? qualityEl.value : 1) || 1;
+  return {{url:document.getElementById(name+'Url').value, apiKey:document.getElementById(name+'ApiKey').value, qualityProfileId:qualityProfileId, rootFolderPath:document.getElementById(name+'Root').value, enabled:document.getElementById(name+'Enabled').checked}};
+}}
+async function discoverRadarrProfiles() {{
+  const urlEl = document.getElementById('radarrUrl');
+  const apiEl = document.getElementById('radarrApiKey');
+  if (!urlEl || !apiEl) return;
+  const url = (urlEl.value || '').trim();
+  const apiKey = (apiEl.value || '').trim();
+  if (!url || !apiKey) return;
+  const res = await post('/api/radarr/discover', {{url, apiKey}});
+  if (!res || !res.ok) return;
+  const q = document.getElementById('radarrQuality');
+  if (q && Array.isArray(res.profiles) && res.profiles.length) {{
+    const current = String(q.value || '');
+    q.innerHTML = '';
+    res.profiles.forEach((p) => {{
+      const opt = document.createElement('option');
+      opt.value = String(p.id);
+      opt.textContent = `${{p.name}} (ID ${{p.id}})`;
+      if (String(p.id) === current) opt.selected = true;
+      q.appendChild(opt);
+    }});
+    if (!q.value) q.value = String(res.profiles[0].id);
+  }}
+}}
 function validateService(name) {{
   let ok = true;
   const url = (document.getElementById(name+'Url').value || '').trim();
@@ -1497,6 +1543,9 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/api/service/"):
                 name = path.split("/")[3]
                 config[name].update(data)
+                config[name]["enabled"] = bool(config[name].get("enabled"))
+                if "qualityProfileId" in config[name]:
+                    config[name]["qualityProfileId"] = safe_int(config[name].get("qualityProfileId"), 1, minimum=1)
                 if name == "radarr" and not str(config["radarr"].get("rootFolderPath", "")).strip():
                     discovered = discover_radarr_options(config["radarr"])
                     if discovered["folders"]:
@@ -1507,8 +1556,10 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/general":
                 config["app"]["dripMode"] = data.get("dripMode", "sync")
-                config["app"]["intervalMinutes"] = int(data["intervalMinutes"])
-                config["app"]["maxItemsPerRun"] = int(data["maxItemsPerRun"])
+                if config["app"]["dripMode"] not in ("timed", "sync"):
+                    config["app"]["dripMode"] = "sync"
+                config["app"]["intervalMinutes"] = safe_int(data.get("intervalMinutes"), config["app"].get("intervalMinutes", 60), minimum=1, maximum=24 * 60)
+                config["app"]["maxItemsPerRun"] = safe_int(data.get("maxItemsPerRun"), config["app"].get("maxItemsPerRun", 1), minimum=1, maximum=50)
                 tmdb_enabled = bool(data.get("tmdbImporterEnabled", True))
                 imdb_enabled = bool(data.get("imdbImporterEnabled", False))
                 if tmdb_enabled and imdb_enabled:
@@ -1546,6 +1597,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/import-csv":
                 csv_text = data.get("csvText", "")
                 media_type = data.get("mediaType", "movie")
+                if media_type not in ("movie", "series"):
+                    media_type = "movie"
                 list_name = str(data.get("name", "")).strip()
                 if not list_name:
                     raise RuntimeError("Lijstnaam is verplicht.")
@@ -1575,6 +1628,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/run-now":
+                if not bool(config.get("app", {}).get("workerEnabled")):
+                    self.respond(200, json.dumps({"ok": True, "message": "Worker staat op pauze. Zet Start eerst aan.", "reload": False}), "application/json")
+                    return
                 with LOCK:
                     process_once()
                 self.respond(200, json.dumps({"ok": True, "message": LAST_RUN["message"], "reload": True}), "application/json")
