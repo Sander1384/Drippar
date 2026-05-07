@@ -618,9 +618,16 @@ def process_once(force=False):
             item["error"] = ""
             LAST_RUN.update({"at": item["addedAt"], "message": f"Toegevoegd: {item['title']}"})
         except RuntimeError as error:
-            item["status"] = "failed"
-            item["error"] = str(error)
-            LAST_RUN.update({"at": utc_now(), "message": f"Fout bij {item['title']}: {error}"})
+            error_text = str(error)
+            if "IMDb kon niet naar TMDb worden vertaald" in error_text:
+                item["status"] = "skipped"
+                item["error"] = f"Niet resolvebaar: {error_text}"
+                item["addedAt"] = utc_now()
+                LAST_RUN.update({"at": item["addedAt"], "message": f"Overgeslagen (niet resolvebaar): {item['title']}"})
+            else:
+                item["status"] = "failed"
+                item["error"] = error_text
+                LAST_RUN.update({"at": utc_now(), "message": f"Fout bij {item['title']}: {error}"})
     write_queue(rows)
 
 
