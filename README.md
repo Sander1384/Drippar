@@ -24,6 +24,21 @@ Import an IMDb CSV, review the queue, choose how quickly items should drip into 
 > [!IMPORTANT]
 > Driparr is intentionally focused on IMDb CSV to Radarr. It is built for predictable, visible drip-feeding rather than broad list-sync automation.
 
+## Screenshots
+
+<p align="center">
+  <img src="Screenshots/1.jpg" alt="Driparr login" width="45%">
+  <img src="Screenshots/2.jpg" alt="Driparr quick setup" width="45%">
+</p>
+<p align="center">
+  <img src="Screenshots/3.jpg" alt="Driparr dashboard" width="45%">
+  <img src="Screenshots/4.jpg" alt="Driparr queue" width="45%">
+</p>
+<p align="center">
+  <img src="Screenshots/5.jpg" alt="Driparr settings" width="45%">
+  <img src="Screenshots/6.jpg" alt="Driparr import flow" width="45%">
+</p>
+
 ## Why Use It?
 
 - Avoid bulk-import spikes in Radarr.
