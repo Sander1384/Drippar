@@ -1001,7 +1001,7 @@ def settings_form(name, values, include_actions=True):
     return f"""<div class="panel service-form"><div class="service-grid">
 <div class="service-row"><label>Enabled</label><label class="switch"><input id="{name}Enabled" class="switch-input" type="checkbox" {checked}><span class="switch-slider"></span></label></div>
 <div class="service-row"><label>URL *</label><input id="{name}Url" value="{html.escape(values.get('url',''))}" placeholder="http://radarr:7878"><div id="{name}UrlError" class="field-error"></div></div>
-<div class="service-row"><label>API key *</label><input id="{name}ApiKey" value="{html.escape(values.get('apiKey',''))}" placeholder="API key"><div id="{name}ApiKeyError" class="field-error"></div></div>
+<div class="service-row"><label>API key *</label><input id="{name}ApiKey" value="{html.escape(values.get('apiKey',''))}" placeholder="API key"><div id="{name}ApiKeyError" class="field-error"></div><div class="conn-inline"><span id="{name}ConnIndicator" class="conn-indicator"><span class="conn-dot"></span><span id="{name}ConnText">Nog niet getest</span></span><button class="btn secondary" type="button" onclick="quickCheckService('{name}')">Check now</button></div></div>
 {quality_field}
 <div class="service-row"><label>Root Folder</label><input id="{name}Root" value="{html.escape(values.get('rootFolderPath',''))}" placeholder="/movies"></div>
 </div>{actions}</div>"""
@@ -1190,6 +1190,19 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 .connected-on {{ background:#123c2a; color:#3fe08f; border:1px solid #1d6546; }}
 .connected-off {{ background:#3b1622; color:#ff7f96; border:1px solid #7f3247; }}
 .toast {{ position:fixed; right:18px; bottom:18px; background:#22143a; border:1px solid #544078; color:white; border-radius:8px; padding:12px; display:none; }}
+.service-status {{ margin-top:10px; padding:10px 12px; border-radius:10px; border:1px solid #3f315f; background:#19122c; color:#d8cfff; font-size:13px; }}
+.service-status.busy {{ border-color:#5f4aa0; color:#d8c9ff; }}
+.service-status.ok {{ border-color:#2c6b4b; background:#12261d; color:#82eab8; }}
+.service-status.error {{ border-color:#8a3149; background:#2a121b; color:#ff9db0; }}
+.conn-inline {{ display:flex; align-items:center; gap:10px; margin-top:8px; }}
+.conn-indicator {{ display:inline-flex; align-items:center; gap:7px; padding:5px 9px; border:1px solid #4d3a7b; border-radius:999px; background:#18112a; font-size:12px; color:#cfc3ee; }}
+.conn-dot {{ width:8px; height:8px; border-radius:999px; background:#8f84b3; box-shadow:0 0 0 3px rgba(143,132,179,.15); }}
+.conn-indicator.ok {{ border-color:#2c6b4b; color:#82eab8; }}
+.conn-indicator.ok .conn-dot {{ background:#3fe08f; box-shadow:0 0 0 3px rgba(63,224,143,.18); }}
+.conn-indicator.busy {{ border-color:#5f4aa0; color:#d8c9ff; }}
+.conn-indicator.busy .conn-dot {{ background:#9d8dff; box-shadow:0 0 0 3px rgba(157,141,255,.18); }}
+.conn-indicator.error {{ border-color:#8a3149; color:#ff9db0; }}
+.conn-indicator.error .conn-dot {{ background:#ff7f96; box-shadow:0 0 0 3px rgba(255,127,150,.16); }}
 .modal-backdrop {{ display:none; position:fixed; inset:0; background:rgba(5,3,12,.75); backdrop-filter: blur(3px); z-index:2500; align-items:center; justify-content:center; padding:18px; animation:fadeIn .18s ease; }}
 .modal-backdrop.open {{ display:flex; }}
 .modal-card {{ width:min(760px,96vw); background:linear-gradient(160deg,#19112d,#120a20); border:1px solid #4b3680; border-radius:14px; box-shadow:0 24px 70px rgba(0,0,0,.52); overflow:hidden; animation:riseIn .2s ease; }}
@@ -1327,7 +1340,13 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 <div id=\"toast\" class=\"toast\"></div>
 <script>
 function openTab(tabId) {{ document.querySelectorAll('nav button').forEach(b => b.classList.remove('active')); document.querySelectorAll('.tab').forEach(t => t.classList.remove('active')); const btn = document.querySelector(`nav button[data-tab="${{tabId}}"]`); if (btn) btn.classList.add('active'); const tab = document.getElementById(tabId); if (tab) tab.classList.add('active'); }}
-function openModal(id) {{ const m=document.getElementById(id); if (m) m.classList.add('open'); if (id === 'radarrModal') discoverRadarrProfiles(); }}
+function openModal(id) {{
+  const m=document.getElementById(id);
+  if (m) m.classList.add('open');
+  if (id === 'radarrModal') discoverRadarrProfiles();
+  if (id === 'radarrModal') wireServiceHealth('radarr');
+  if (id === 'sonarrModal') wireServiceHealth('sonarr');
+}}
 function closeModal(id) {{ const m=document.getElementById(id); if (m) m.classList.remove('open'); }}
 function detectLanguage() {{
   const pref = localStorage.getItem('driparr_lang_pref') || 'auto';
@@ -1491,8 +1510,104 @@ function applyI18n() {{
   document.documentElement.lang = lang;
 }}
 document.querySelectorAll('nav button[data-tab]').forEach(btn => btn.onclick = () => openTab(btn.dataset.tab));
-async function post(url, data) {{ const r = await fetch(url, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify(data)}}); if (r.status===401) {{ location.href='/login'; return; }} const j = await r.json(); toast(j.message || (j.ok ? 'Saved' : 'Error')); if (j.reload) setTimeout(()=>location.reload(), 650); return j; }}
+async function post(url, data) {{
+  const r = await fetch(url, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify(data)}});
+  if (r.status===401) {{ location.href='/login'; return; }}
+  let j = null;
+  try {{
+    j = await r.json();
+  }} catch (_e) {{
+    j = {{ok:false, message:`Server antwoordde met HTTP ${{r.status}}.`}};
+  }}
+  toast(j.message || (j.ok ? 'Saved' : 'Error'));
+  if (j.reload) setTimeout(()=>location.reload(), 650);
+  return j;
+}}
 function toast(msg) {{ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none',3000); }}
+function ensureServiceStatusEl(name) {{
+  let el = document.getElementById(name + 'ServiceStatus');
+  if (el) return el;
+  const modal = document.getElementById(name + 'Modal');
+  const foot = modal ? modal.querySelector('.modal-foot') : null;
+  if (!foot) return null;
+  el = document.createElement('div');
+  el.id = name + 'ServiceStatus';
+  el.className = 'service-status';
+  el.style.display = 'none';
+  foot.insertBefore(el, foot.firstChild);
+  return el;
+}}
+function setServiceStatus(name, kind, message) {{
+  const el = ensureServiceStatusEl(name);
+  if (!el) return;
+  el.classList.remove('busy','ok','error');
+  el.classList.add(kind || 'busy');
+  el.textContent = message || '';
+  el.style.display = 'block';
+}}
+function setConnIndicator(name, kind, text) {{
+  const wrap = document.getElementById(name + 'ConnIndicator');
+  const label = document.getElementById(name + 'ConnText');
+  if (!wrap || !label) return;
+  wrap.classList.remove('busy','ok','error');
+  if (kind) wrap.classList.add(kind);
+  label.textContent = text || 'Nog niet getest';
+}}
+function setServiceButtonsBusy(name, busy) {{
+  const selectors = [
+    `button[onclick="testService('${{name}}')"]`,
+    `button[onclick="saveService('${{name}}')"]`
+  ];
+  selectors.forEach((sel) => {{
+    document.querySelectorAll(sel).forEach((btn) => {{
+      btn.disabled = !!busy;
+    }});
+  }});
+}}
+const serviceHealthTimers = {{}};
+const serviceHealthWired = {{}};
+function scheduleServiceHealthCheck(name, delayMs) {{
+  if (serviceHealthTimers[name]) clearTimeout(serviceHealthTimers[name]);
+  serviceHealthTimers[name] = setTimeout(() => {{
+    quickCheckService(name, true);
+  }}, delayMs || 750);
+}}
+function wireServiceHealth(name) {{
+  if (serviceHealthWired[name]) return;
+  const urlEl = document.getElementById(name + 'Url');
+  const apiEl = document.getElementById(name + 'ApiKey');
+  if (!urlEl || !apiEl) return;
+  const onInput = () => {{
+    const hasValues = (urlEl.value || '').trim() && (apiEl.value || '').trim();
+    if (!hasValues) {{
+      setConnIndicator(name, 'error', 'URL/API key ontbreken');
+      return;
+    }}
+    setConnIndicator(name, 'busy', 'Wijziging gedetecteerd, controleren...');
+    scheduleServiceHealthCheck(name, 900);
+  }};
+  urlEl.addEventListener('input', onInput);
+  apiEl.addEventListener('input', onInput);
+  serviceHealthWired[name] = true;
+}}
+async function quickCheckService(name, silent) {{
+  if (!validateService(name)) return;
+  if (!silent) setServiceStatus(name, 'busy', 'Verbinding testen...');
+  setConnIndicator(name, 'busy', 'Verbinding testen...');
+  try {{
+    const j = await post('/api/service/'+name+'/test', serviceData(name));
+    if (j && j.ok) {{
+      setConnIndicator(name, 'ok', 'Verbonden');
+      if (!silent) setServiceStatus(name, 'ok', j.message || 'Verbinding succesvol.');
+    }} else {{
+      setConnIndicator(name, 'error', 'Niet verbonden');
+      if (!silent) setServiceStatus(name, 'error', (j && j.message) ? j.message : 'Verbinding mislukt.');
+    }}
+  }} catch (e) {{
+    setConnIndicator(name, 'error', 'Niet verbonden');
+    if (!silent) setServiceStatus(name, 'error', `Verbinding mislukt: ${{e?.message || 'onbekende fout'}}`);
+  }}
+}}
 function serviceData(name) {{
   const qualityEl = document.getElementById(name+'Quality');
   const qualityProfileId = Number((qualityEl && qualityEl.value) ? qualityEl.value : 1) || 1;
@@ -1533,8 +1648,48 @@ function validateService(name) {{
   if (!api) {{ if (apiErr) apiErr.textContent = 'API key is required'; ok = false; }}
   return ok;
 }}
-function saveService(name) {{ if (!validateService(name)) return; post('/api/service/'+name, serviceData(name)); }}
-function testService(name) {{ if (!validateService(name)) return; post('/api/service/'+name+'/test', serviceData(name)); }}
+async function saveService(name) {{
+  if (!validateService(name)) return;
+  setServiceStatus(name, 'busy', 'Bezig met opslaan en valideren...');
+  setConnIndicator(name, 'busy', 'Valideren...');
+  setServiceButtonsBusy(name, true);
+  try {{
+    const j = await post('/api/service/'+name, serviceData(name));
+    if (j && j.ok) {{
+      setServiceStatus(name, 'ok', j.message || 'Instellingen opgeslagen.');
+      setConnIndicator(name, 'ok', 'Verbonden');
+    }} else {{
+      setServiceStatus(name, 'error', (j && j.message) ? j.message : 'Opslaan mislukt.');
+      setConnIndicator(name, 'error', 'Niet verbonden');
+    }}
+  }} catch (e) {{
+    setServiceStatus(name, 'error', `Opslaan mislukt: ${{e?.message || 'onbekende fout'}}`);
+    setConnIndicator(name, 'error', 'Niet verbonden');
+  }} finally {{
+    setServiceButtonsBusy(name, false);
+  }}
+}}
+async function testService(name) {{
+  if (!validateService(name)) return;
+  setServiceStatus(name, 'busy', 'Verbinding testen...');
+  setConnIndicator(name, 'busy', 'Verbinding testen...');
+  setServiceButtonsBusy(name, true);
+  try {{
+    const j = await post('/api/service/'+name+'/test', serviceData(name));
+    if (j && j.ok) {{
+      setServiceStatus(name, 'ok', j.message || 'Verbinding succesvol.');
+      setConnIndicator(name, 'ok', 'Verbonden');
+    }} else {{
+      setServiceStatus(name, 'error', (j && j.message) ? j.message : 'Verbinding mislukt.');
+      setConnIndicator(name, 'error', 'Niet verbonden');
+    }}
+  }} catch (e) {{
+    setServiceStatus(name, 'error', `Verbinding mislukt: ${{e?.message || 'onbekende fout'}}`);
+    setConnIndicator(name, 'error', 'Niet verbonden');
+  }} finally {{
+    setServiceButtonsBusy(name, false);
+  }}
+}}
 function saveGeneral(toggle) {{ post('/api/general', {{dripMode:dripMode.value, intervalMinutes:Number(intervalMinutes.value), maxItemsPerRun:Number(maxItemsPerRun.value), notifyEnabled:(document.getElementById('notifyEnabled') ? document.getElementById('notifyEnabled').checked : false), notifyWebhookUrl:(document.getElementById('notifyWebhookUrl') ? document.getElementById('notifyWebhookUrl').value : ''), toggleWorker:!!toggle, workerEnabled:(document.getElementById('workerEnabled') ? document.getElementById('workerEnabled').checked : undefined)}}); }}
 function testNotification() {{ post('/api/notify-test', {{}}); }}
 function setIntervalFromPreset() {{ if (intervalPreset.value !== 'custom') intervalMinutes.value = Number(intervalPreset.value); }}
@@ -1895,8 +2050,11 @@ class Handler(BaseHTTPRequestHandler):
 
             if path.startswith("/api/service/") and path.endswith("/test"):
                 name = path.split("/")[3]
-                service_request(data, "GET", "/system/status")
-                self.respond(200, json.dumps({"ok": True, "message": f"{name.title()} bereikbaar."}), "application/json")
+                status = service_request(data, "GET", "/system/status")
+                app_name = str((status or {}).get("appName", name.title())).strip() or name.title()
+                version = str((status or {}).get("version", "")).strip()
+                version_suffix = f" (v{version})" if version else ""
+                self.respond(200, json.dumps({"ok": True, "message": f"Verbonden met {app_name}{version_suffix}."}), "application/json")
                 return
 
             if path == "/api/radarr/discover":
