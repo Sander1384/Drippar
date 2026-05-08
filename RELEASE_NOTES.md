@@ -1,6 +1,6 @@
-# Driparr v0.1.0
+# Driparr v0.1.1
 
-First public release of Driparr: a lightweight drip-feed helper for sending IMDb CSV lists to Radarr in controlled batches.
+Small public-page cleanup release for Driparr: the container image now uses the Driparr package name and the README uses the app rabbit logo.
 
 ## Highlights
 
@@ -21,7 +21,7 @@ Create a data folder and a `docker-compose.yml`:
 ```yaml
 services:
   driparr:
-    image: ghcr.io/sander1384/seerrdripfeed:v0.1.0
+    image: ghcr.io/sander1384/driparr:v0.1.1
     container_name: driparr
     restart: unless-stopped
     ports:

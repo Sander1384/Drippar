@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  IMAGE_NAME: ghcr.io/sander1384/seerrdripfeed
+  IMAGE_NAME: ghcr.io/sander1384/driparr
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:

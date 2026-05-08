@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/driparr.png" alt="Driparr" width="420">
+  <img src="assets/rabbit.svg" alt="Driparr" width="180">
 </p>
 
 <h1 align="center">Driparr</h1>
@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/Sander1384/Drippar/releases/tag/v0.1.0"><img alt="Release" src="https://img.shields.io/github/v/release/Sander1384/Drippar?label=release"></a>
   <a href="https://github.com/Sander1384/Drippar/actions/workflows/docker-publish.yml"><img alt="Docker build" src="https://img.shields.io/github/actions/workflow/status/Sander1384/Drippar/docker-publish.yml?branch=main&label=docker%20build"></a>
-  <a href="https://github.com/Sander1384/Drippar/pkgs/container/seerrdripfeed"><img alt="GHCR" src="https://img.shields.io/badge/GHCR-seerrdripfeed-blue"></a>
+  <a href="https://github.com/Sander1384/Drippar/pkgs/container/driparr"><img alt="GHCR" src="https://img.shields.io/badge/GHCR-driparr-blue"></a>
   <img alt="Docker" src="https://img.shields.io/badge/docker-ready-2496ED">
 </p>
 
@@ -71,7 +71,7 @@ Create `docker-compose.yml`:
 ```yaml
 services:
   driparr:
-    image: ghcr.io/sander1384/seerrdripfeed:v0.1.0
+    image: ghcr.io/sander1384/driparr:v0.1.1
     container_name: driparr
     restart: unless-stopped
     ports:
@@ -172,7 +172,7 @@ For stable releases, update the image tag in your compose file when a new releas
 For automatic latest builds from `main`, use:
 
 ```yaml
-image: ghcr.io/sander1384/seerrdripfeed:latest
+image: ghcr.io/sander1384/driparr:latest
 ```
 
 Then pull and restart:
@@ -211,8 +211,8 @@ docker compose up -d
 
 ## Links
 
-- [Latest release](https://github.com/Sander1384/Drippar/releases/tag/v0.1.0)
-- [Container image](https://github.com/Sander1384/Drippar/pkgs/container/seerrdripfeed)
+- [Latest release](https://github.com/Sander1384/Drippar/releases/tag/v0.1.1)
+- [Container image](https://github.com/Sander1384/Drippar/pkgs/container/driparr)
 - [Docker workflow](https://github.com/Sander1384/Drippar/actions/workflows/docker-publish.yml)
 
 ## Credits
