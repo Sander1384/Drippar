@@ -1266,6 +1266,11 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 .modal-body {{ padding:14px 16px 0; max-height:70vh; overflow:auto; }}
 .modal-foot {{ position:sticky; bottom:0; display:flex; justify-content:space-between; align-items:center; gap:10px; padding:12px 16px; border-top:1px solid #2f214c; background:linear-gradient(160deg,#171027,#120a20); }}
 .field-error {{ color:#ff6f8f; font-size:12px; min-height:16px; margin-top:4px; }}
+.is-invalid {{ border-color:#ff6b8f !important; box-shadow:0 0 0 3px rgba(255,107,143,.2) !important; }}
+.ob-status {{ margin-top:8px; font-size:12px; color:#cbbdf0; }}
+.ob-status.ok {{ color:#82eab8; }}
+.ob-status.error {{ color:#ff9db0; }}
+.ob-inline {{ display:flex; align-items:end; gap:8px; }}
 .service-form {{ padding:16px; border:1px solid #4b3a79; border-radius:12px; background:linear-gradient(145deg,#22173c,#1a1230); }}
 .service-grid {{ display:grid; grid-template-columns:1fr; gap:6px; }}
 .service-row {{ display:block; }}
@@ -1390,7 +1395,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 </main></div>
 <div id=\"radarrModal\" class=\"modal-backdrop\"><div class=\"modal-card\"><div class=\"modal-head\"><b>Add Instance</b><button class=\"modal-close\" onclick=\"closeModal('radarrModal')\">×</button></div><div class=\"modal-body\">{settings_form('radarr', config['radarr'], include_actions=False)}</div><div class=\"modal-foot\"><button class=\"btn secondary\" onclick=\"testService('radarr')\">Test</button><button class=\"btn\" onclick=\"saveService('radarr')\">Save</button></div></div></div>
 <div id=\"sonarrModal\" class=\"modal-backdrop\"><div class=\"modal-card\"><div class=\"modal-head\"><b>Add Instance</b><button class=\"modal-close\" onclick=\"closeModal('sonarrModal')\">×</button></div><div class=\"modal-body\">{settings_form('sonarr', config['sonarr'], include_actions=False)}</div><div class=\"modal-foot\"><button class=\"btn secondary\" onclick=\"testService('sonarr')\">Test</button><button class=\"btn\" onclick=\"saveService('sonarr')\">Save</button></div></div></div>
-<div id=\"onboardingModal\" class=\"modal-backdrop{' open' if show_onboarding else ''}\"><div class=\"modal-card\"><div class=\"modal-head\"><b data-i18n=\"onboarding_title\">Quick Start Checklist</b><button class=\"modal-close\" onclick=\"dismissOnboarding()\">×</button></div><div class=\"modal-body\"><p class=\"sub\" data-i18n=\"onboarding_sub\">Follow these steps once and you're ready.</p><ol class=\"onboarding-list\"><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-link\" src=\"/assets/link.svg\" alt=\"link\"><span data-i18n=\"onboarding_1\">Connect Radarr.</span></div><span class=\"onb-check {'done' if step1_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-add\" src=\"/assets/add.svg\" alt=\"add\"><span data-i18n=\"onboarding_2\">Import an IMDb CSV list.</span></div><span class=\"onb-check {'done' if step2_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-drip\" src=\"/assets/water-drop.svg\" alt=\"drip\"><span data-i18n=\"onboarding_3\">Choose drip mode (timed or sync) and interval.</span></div><span class=\"onb-check {'done' if step3_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-toggle\" src=\"/assets/toggle.svg\" alt=\"toggle\"><span data-i18n=\"onboarding_4\">Enable worker and monitor the timeline.</span></div><span class=\"onb-check {'done' if step4_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li></ol><div class=\"onboarding-setup\"><div class=\"grid\"><div><label>Radarr URL *</label><input id=\"obRadarrUrl\" value=\"{html.escape(config.get('radarr', {}).get('url',''))}\" placeholder=\"http://radarr:7878\"></div><div><label>Radarr API key *</label><input id=\"obRadarrApi\" value=\"{html.escape(config.get('radarr', {}).get('apiKey',''))}\" placeholder=\"API key\"></div></div></div><p class=\"slogan\" data-i18n=\"set_and_forget\">Set and forget.</p></div><div class=\"modal-foot\"><span></span><button class=\"btn onboarding-save\" onclick=\"saveOnboardingSetup()\">Opslaan</button></div></div></div>
+<div id=\"onboardingModal\" class=\"modal-backdrop{' open' if show_onboarding else ''}\"><div class=\"modal-card\"><div class=\"modal-head\"><b data-i18n=\"onboarding_title\">Quick Start Checklist</b><button class=\"modal-close\" onclick=\"dismissOnboarding()\">×</button></div><div class=\"modal-body\"><p class=\"sub\" data-i18n=\"onboarding_sub\">Follow these steps once and you're ready.</p><ol class=\"onboarding-list\"><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-link\" src=\"/assets/link.svg\" alt=\"link\"><span data-i18n=\"onboarding_1\">Connect Radarr.</span></div><span class=\"onb-check {'done' if step1_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-add\" src=\"/assets/add.svg\" alt=\"add\"><span data-i18n=\"onboarding_2\">Import an IMDb CSV list.</span></div><span class=\"onb-check {'done' if step2_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-drip\" src=\"/assets/water-drop.svg\" alt=\"drip\"><span data-i18n=\"onboarding_3\">Choose drip mode (timed or sync) and interval.</span></div><span class=\"onb-check {'done' if step3_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-toggle\" src=\"/assets/toggle.svg\" alt=\"toggle\"><span data-i18n=\"onboarding_4\">Enable worker and monitor the timeline.</span></div><span class=\"onb-check {'done' if step4_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li></ol><div class=\"onboarding-setup\"><div class=\"grid\"><div><label>Radarr URL *</label><input id=\"obRadarrUrl\" value=\"{html.escape(config.get('radarr', {}).get('url',''))}\" placeholder=\"http://radarr:7878\"><div id=\"obRadarrUrlError\" class=\"field-error\"></div></div><div><label>Radarr API key *</label><input id=\"obRadarrApi\" value=\"{html.escape(config.get('radarr', {}).get('apiKey',''))}\" placeholder=\"API key\"><div id=\"obRadarrApiError\" class=\"field-error\"></div></div></div><div class=\"grid\"><div><label>Quality Profile</label><select id=\"obRadarrQuality\" disabled><option value=\"\">Eerst testen...</option></select><div id=\"obQualityStatus\" class=\"ob-status\">Test eerst de verbinding om profielen op te halen.</div></div><div class=\"ob-inline\"><button class=\"btn secondary\" type=\"button\" onclick=\"testOnboardingRadarr()\">Test</button></div></div></div><p class=\"slogan\" data-i18n=\"set_and_forget\">Set and forget.</p></div><div class=\"modal-foot\"><span></span><button class=\"btn onboarding-save\" onclick=\"saveOnboardingSetup()\">Opslaan</button></div></div></div>
 <div id=\"toast\" class=\"toast\"></div>
 <script>
 function openTab(tabId) {{ document.querySelectorAll('nav button').forEach(b => b.classList.remove('active')); document.querySelectorAll('.tab').forEach(t => t.classList.remove('active')); const btn = document.querySelector(`nav button[data-tab="${{tabId}}"]`); if (btn) btn.classList.add('active'); const tab = document.getElementById(tabId); if (tab) tab.classList.add('active'); }}
@@ -1864,11 +1869,90 @@ function dismissOnboarding() {{
   if (modal) modal.classList.remove('open');
   post('/api/onboarding-dismiss', {{}});
 }}
+function validateOnboardingRadarrFields() {{
+  const urlEl = document.getElementById('obRadarrUrl');
+  const apiEl = document.getElementById('obRadarrApi');
+  const urlErr = document.getElementById('obRadarrUrlError');
+  const apiErr = document.getElementById('obRadarrApiError');
+  const url = (urlEl?.value || '').trim();
+  const api = (apiEl?.value || '').trim();
+  if (urlErr) urlErr.textContent = '';
+  if (apiErr) apiErr.textContent = '';
+  if (urlEl) urlEl.classList.remove('is-invalid');
+  if (apiEl) apiEl.classList.remove('is-invalid');
+  let ok = true;
+  if (!url) {{
+    ok = false;
+    if (urlEl) urlEl.classList.add('is-invalid');
+    if (urlErr) urlErr.textContent = 'Radarr URL is verplicht.';
+  }} else if (!/^https?:\\/\\//i.test(url)) {{
+    ok = false;
+    if (urlEl) urlEl.classList.add('is-invalid');
+    if (urlErr) urlErr.textContent = 'Gebruik http:// of https://';
+  }}
+  if (!api) {{
+    ok = false;
+    if (apiEl) apiEl.classList.add('is-invalid');
+    if (apiErr) apiErr.textContent = 'Radarr API key is verplicht.';
+  }}
+  return ok;
+}}
+async function testOnboardingRadarr() {{
+  if (!validateOnboardingRadarrFields()) return;
+  const url = (document.getElementById('obRadarrUrl')?.value || '').trim();
+  const apiKey = (document.getElementById('obRadarrApi')?.value || '').trim();
+  const qualityEl = document.getElementById('obRadarrQuality');
+  const statusEl = document.getElementById('obQualityStatus');
+  if (qualityEl) {{
+    qualityEl.disabled = true;
+    qualityEl.innerHTML = '<option value=\"\">Testen...</option>';
+  }}
+  if (statusEl) {{
+    statusEl.classList.remove('ok', 'error');
+    statusEl.textContent = 'Verbinding testen...';
+  }}
+  const j = await post('/api/radarr/discover', {{url:url, apiKey:apiKey}});
+  if (!j || !j.ok) {{
+    if (statusEl) {{
+      statusEl.classList.remove('ok');
+      statusEl.classList.add('error');
+      statusEl.textContent = (j && j.message) ? j.message : 'Verbinding mislukt.';
+    }}
+    return;
+  }}
+  const profiles = Array.isArray(j.profiles) ? j.profiles : [];
+  if (!profiles.length) {{
+    if (statusEl) {{
+      statusEl.classList.remove('ok');
+      statusEl.classList.add('error');
+      statusEl.textContent = 'Geen quality profiles gevonden in Radarr.';
+    }}
+    return;
+  }}
+  if (qualityEl) {{
+    qualityEl.innerHTML = '';
+    profiles.forEach((p) => {{
+      const opt = document.createElement('option');
+      opt.value = String(p.id);
+      opt.textContent = `${{p.name}} (ID ${{p.id}})`;
+      qualityEl.appendChild(opt);
+    }});
+    qualityEl.disabled = false;
+  }}
+  if (statusEl) {{
+    statusEl.classList.remove('error');
+    statusEl.classList.add('ok');
+    statusEl.textContent = 'Verbonden. Kies nu je quality profile.';
+  }}
+}}
 function saveOnboardingSetup() {{
   const url = (document.getElementById('obRadarrUrl')?.value || '').trim();
   const apiKey = (document.getElementById('obRadarrApi')?.value || '').trim();
-  if (!url || !apiKey) {{ toast('Radarr URL en API key zijn verplicht.'); return; }}
-  post('/api/quick-setup', {{radarrUrl:url, radarrApiKey:apiKey}}).then((j) => {{
+  const qualitySelect = document.getElementById('obRadarrQuality');
+  const qualityValue = qualitySelect && !qualitySelect.disabled ? Number(qualitySelect.value || 0) : 0;
+  if (!validateOnboardingRadarrFields()) return;
+  if (!qualityValue) {{ toast('Test eerst Radarr en kies een quality profile.'); return; }}
+  post('/api/quick-setup', {{radarrUrl:url, radarrApiKey:apiKey, qualityProfileId:qualityValue}}).then((j) => {{
     if (j && j.ok) {{
       dismissOnboarding();
       localStorage.setItem('driparr_next_step', 'lists');
@@ -1879,6 +1963,20 @@ function saveOnboardingSetup() {{
 function showOnboardingAgain() {{
   post('/api/onboarding-reset', {{}}).then(() => location.reload());
 }}
+function resetOnboardingQualityState() {{
+  const qualityEl = document.getElementById('obRadarrQuality');
+  const statusEl = document.getElementById('obQualityStatus');
+  if (qualityEl) {{
+    qualityEl.disabled = true;
+    qualityEl.innerHTML = '<option value=\"\">Eerst testen...</option>';
+  }}
+  if (statusEl) {{
+    statusEl.classList.remove('ok', 'error');
+    statusEl.textContent = 'Test eerst de verbinding om profielen op te halen.';
+  }}
+}}
+document.getElementById('obRadarrUrl')?.addEventListener('input', resetOnboardingQualityState);
+document.getElementById('obRadarrApi')?.addEventListener('input', resetOnboardingQualityState);
 const languagePref = document.getElementById('languagePref');
 if (languagePref) {{
   languagePref.addEventListener('change', () => {{
@@ -2270,18 +2368,21 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/quick-setup":
                 radarr_url = str(data.get("radarrUrl", "")).strip()
                 radarr_api = str(data.get("radarrApiKey", "")).strip()
+                quality_profile_id = safe_int(data.get("qualityProfileId"), 0, minimum=0)
                 if not radarr_url or not radarr_api:
                     raise RuntimeError("Radarr URL en API key zijn verplicht.")
                 config["radarr"]["enabled"] = True
                 config["radarr"]["url"] = radarr_url
                 config["radarr"]["apiKey"] = radarr_api
                 service_request(config["radarr"], "GET", "/system/status")
+                discovered = discover_radarr_options(config["radarr"])
                 if not str(config["radarr"].get("rootFolderPath", "")).strip():
-                    discovered = discover_radarr_options(config["radarr"])
                     if discovered["folders"]:
                         config["radarr"]["rootFolderPath"] = discovered["folders"][0]["path"]
-                    if discovered["profiles"]:
-                        config["radarr"]["qualityProfileId"] = int(discovered["profiles"][0]["id"])
+                if quality_profile_id > 0:
+                    config["radarr"]["qualityProfileId"] = quality_profile_id
+                elif discovered["profiles"]:
+                    config["radarr"]["qualityProfileId"] = int(discovered["profiles"][0]["id"])
                 config["app"]["setupComplete"] = True
                 config["app"]["onboardingDismissed"] = True
                 save_config(config)
