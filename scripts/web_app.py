@@ -103,6 +103,37 @@ def env_session_secret():
     return os.getenv("DRIPARR_SESSION_SECRET", "replace-me")
 
 
+def env_has_custom_admin():
+    user = os.getenv("DRIPARR_ADMIN_USERNAME", "")
+    pwd = os.getenv("DRIPARR_ADMIN_PASSWORD", "")
+    return bool(user and pwd and not (user == "admin" and pwd == "admin"))
+
+
+def hash_password(password, salt):
+    derived = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 150000)
+    return derived.hex()
+
+
+def app_account_configured(config):
+    app_cfg = config.get("app", {})
+    return bool(app_cfg.get("adminUsername") and app_cfg.get("adminPasswordHash") and app_cfg.get("adminPasswordSalt"))
+
+
+def must_setup_account(config):
+    return (not app_account_configured(config)) and (not env_has_custom_admin())
+
+
+def verify_login(config, username, password):
+    app_cfg = config.get("app", {})
+    if app_account_configured(config):
+        expected_user = str(app_cfg.get("adminUsername", ""))
+        salt = str(app_cfg.get("adminPasswordSalt", ""))
+        expected_hash = str(app_cfg.get("adminPasswordHash", ""))
+        candidate_hash = hash_password(password, salt)
+        return hmac.compare_digest(username, expected_user) and hmac.compare_digest(candidate_hash, expected_hash)
+    return hmac.compare_digest(username, env_admin_username()) and hmac.compare_digest(password, env_admin_password())
+
+
 def ensure_data():
     DATA.mkdir(exist_ok=True)
     if not CONFIG_PATH.exists():
@@ -125,6 +156,9 @@ def default_config():
             "notifyEnabled": False,
             "notifyWebhookUrl": "",
             "runHistory": [],
+            "adminUsername": "",
+            "adminPasswordHash": "",
+            "adminPasswordSalt": "",
         },
         "radarr": {
             "enabled": True,
@@ -169,6 +203,12 @@ def read_config():
         app_cfg["notifyWebhookUrl"] = ""
     if "runHistory" not in app_cfg or not isinstance(app_cfg.get("runHistory"), list):
         app_cfg["runHistory"] = []
+    if "adminUsername" not in app_cfg:
+        app_cfg["adminUsername"] = ""
+    if "adminPasswordHash" not in app_cfg:
+        app_cfg["adminPasswordHash"] = ""
+    if "adminPasswordSalt" not in app_cfg:
+        app_cfg["adminPasswordSalt"] = ""
     return config
 
 
@@ -820,11 +860,37 @@ input:focus {{ outline:none; border-color:#8e6bff; box-shadow:0 0 0 3px rgba(125
 button {{ margin-top:20px; width:100%; border:0; border-radius:10px; padding:13px; color:white; background:linear-gradient(140deg,var(--accent),var(--accent2)); font-size:16px; font-weight:800; cursor:pointer; }}
 .error {{ margin:10px 0 0; color:var(--danger); font-weight:700; }}
 </style></head>
-<body><form method=\"POST\" action=\"/login\" class=\"card\"><div class=\"logo-wrap\"><img class=\"logo\" src=\"/assets/rabbit.svg\" alt=\"Driparr logo\"></div><h1>Driparr</h1><h2 id=\"signin\">Sign In</h2><label id=\"userLabel\">Username</label><input name=\"username\" autocomplete=\"username\" required><label id=\"passLabel\">Password</label><input name=\"password\" type=\"password\" autocomplete=\"current-password\" required>{err}<button id=\"signinBtn\" type=\"submit\">Sign In</button></form><script>
+<body><form method=\"POST\" action=\"/login\" class=\"card\"><div class=\"logo-wrap\"><img class=\"logo\" src=\"/assets/rabbit.svg\" alt=\"Driparr logo\"></div><h1>Driparr</h1><h2 id=\"signin\">Sign In</h2><p style=\"text-align:center;color:#b9a9e5;margin:-8px 0 14px;font-size:13px\">Username en wachtwoord zijn hoofdlettergevoelig.</p><label id=\"userLabel\">Username</label><input name=\"username\" autocomplete=\"username\" required><label id=\"passLabel\">Password</label><input name=\"password\" type=\"password\" autocomplete=\"current-password\" required>{err}<button id=\"signinBtn\" type=\"submit\">Sign In</button></form><script>
 const l=(navigator.language||'en').toLowerCase();const k=l.startsWith('nl')?'nl':(l.startsWith('de')?'de':'en');
 const t={{en:{{s:'Sign In',u:'Username',p:'Password'}},nl:{{s:'Inloggen',u:'Gebruikersnaam',p:'Wachtwoord'}},de:{{s:'Anmelden',u:'Benutzername',p:'Passwort'}}}}[k];
 document.documentElement.lang=k;signin.textContent=t.s;userLabel.textContent=t.u;passLabel.textContent=t.p;signinBtn.textContent=t.s;
 </script></body></html>"""
+
+
+def account_setup_page(error=""):
+    err = f"<div class='error'>{html.escape(error)}</div>" if error else ""
+    return f"""<!doctype html>
+<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Driparr Account Setup</title>
+<style>
+:root {{ --bg:#070214; --panel:#141025; --line:#5941a6; --text:#f3efff; --muted:#a596c9; --accent:#7d4bff; --accent2:#5e2eea; --danger:#ff6b8f; }}
+* {{ box-sizing:border-box; }} body {{ margin:0; min-height:100vh; display:grid; place-items:center; font-family:Segoe UI,Arial,sans-serif; background:radial-gradient(circle at 30% 20%,#1c1143 0,#0c0622 45%,#050212 100%); color:var(--text); }}
+.card {{ width:min(560px,94vw); border:1px solid #3c2d73; border-radius:16px; padding:28px; background:linear-gradient(160deg,rgba(255,255,255,.06),rgba(255,255,255,.02)); box-shadow:0 20px 90px rgba(84,46,205,.35); }}
+h1 {{ margin:0 0 8px; text-align:center; font-size:38px; }}
+p {{ margin:0 0 20px; text-align:center; color:#cbbdf0; }}
+label {{ display:block; margin:12px 0 6px; font-weight:700; color:#c4b7ea; }}
+input {{ width:100%; border:1px solid #5e47aa; border-radius:10px; padding:12px; background:#160f2b; color:var(--text); }}
+button {{ margin-top:16px; width:100%; border:0; border-radius:10px; padding:12px; color:white; background:linear-gradient(140deg,var(--accent),var(--accent2)); font-size:16px; font-weight:800; cursor:pointer; }}
+.error {{ margin:10px 0 0; color:var(--danger); font-weight:700; text-align:center; }}
+</style></head>
+<body><form method=\"POST\" action=\"/account-setup\" class=\"card\">
+<h1>Create Admin Account</h1>
+<p>Stel eerst je eigen login in voor Driparr.<br><small style=\"color:#b9a9e5\">Username en wachtwoord zijn hoofdlettergevoelig.</small></p>
+<label>Username</label><input name=\"username\" minlength=\"3\" maxlength=\"64\" required>
+<label>Password</label><input name=\"password\" type=\"password\" minlength=\"8\" maxlength=\"256\" required>
+<label>Confirm password</label><input name=\"passwordConfirm\" type=\"password\" minlength=\"8\" maxlength=\"256\" required>
+{err}
+<button type=\"submit\">Save account</button>
+</form></body></html>"""
 
 def setup_page(config, error=""):
     err = f"<div class='error'>{html.escape(error)}</div>" if error else ""
@@ -1702,12 +1768,18 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.respond(404, "Not found", "text/plain")
             return
+        config = read_config()
+        if must_setup_account(config) and path != "/account-setup":
+            self.respond(302, "", location="/account-setup")
+            return
+        if path == "/account-setup":
+            self.respond(200, account_setup_page())
+            return
         if path == "/login":
             self.respond(200, login_page())
             return
         if self.auth_required():
             return
-        config = read_config()
         if path == "/setup":
             self.respond(302, "", location="/")
             return
@@ -1725,6 +1797,16 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.send_response(404)
                 self.end_headers()
+            return
+        config = read_config()
+        if must_setup_account(config) and path != "/account-setup":
+            self.send_response(302)
+            self.send_header("Location", "/account-setup")
+            self.end_headers()
+            return
+        if path == "/account-setup":
+            self.send_response(200)
+            self.end_headers()
             return
         if path == "/login":
             self.send_response(200)
@@ -1745,11 +1827,34 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if path == "/account-setup":
+            try:
+                form = self.read_form()
+                username = str(form.get("username", "")).strip()
+                password = str(form.get("password", ""))
+                password_confirm = str(form.get("passwordConfirm", ""))
+                if len(username) < 3:
+                    raise RuntimeError("Username moet minimaal 3 tekens zijn.")
+                if len(password) < 8:
+                    raise RuntimeError("Password moet minimaal 8 tekens zijn.")
+                if password != password_confirm:
+                    raise RuntimeError("Passwords komen niet overeen.")
+                config = read_config()
+                salt = secrets.token_hex(16)
+                config["app"]["adminUsername"] = username
+                config["app"]["adminPasswordSalt"] = salt
+                config["app"]["adminPasswordHash"] = hash_password(password, salt)
+                save_config(config)
+                self.respond(302, "", location="/login")
+            except Exception as error:
+                self.respond(200, account_setup_page(str(error)))
+            return
         if path == "/login":
             form = self.read_form()
             username = form.get("username", "")
             password = form.get("password", "")
-            if hmac.compare_digest(username, env_admin_username()) and hmac.compare_digest(password, env_admin_password()):
+            config = read_config()
+            if verify_login(config, username, password):
                 session_id = issue_session(username)
                 cookie = f"driparr_session={session_id}; HttpOnly; Path=/; SameSite=Lax"
                 self.respond(302, "", set_cookie=cookie, location="/")
@@ -1781,7 +1886,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(200, setup_page(read_config(), str(error)))
             return
 
-        if path != "/login" and self.auth_required():
+        if path not in ("/login", "/account-setup") and self.auth_required():
             return
 
         try:
