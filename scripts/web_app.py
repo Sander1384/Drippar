@@ -915,6 +915,8 @@ input {{ width:100%; border:1px solid #5e47aa; border-radius:10px; padding:12px;
 .actions {{ margin-top:16px; display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end; }} button {{ border:0; border-radius:10px; padding:12px 14px; color:white; background:linear-gradient(140deg,var(--accent),var(--accent2)); font-weight:800; cursor:pointer; }}
 .btn-secondary {{ background:#21173a; border:1px solid #4e3c7c; }}
 .error {{ margin:10px 0 0; color:var(--danger); font-weight:700; }}
+.field-error {{ margin-top:6px; color:var(--danger); font-size:12px; min-height:16px; }}
+.is-invalid {{ border-color:#ff6b8f !important; box-shadow:0 0 0 3px rgba(255,107,143,.2) !important; }}
 .switch-row {{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0; }}
 .switch {{ position:relative; display:inline-block; width:44px; height:24px; }}
 .switch-input {{ opacity:0; width:0; height:0; }}
@@ -938,17 +940,19 @@ summary {{ cursor:pointer; color:#c9bcf0; font-weight:700; }}
 </ul>
 <div class=\"panel\">
 <div class=\"grid\">
-<div><label id=\"lRadarrUrl\">Radarr URL *</label><input name=\"radarrUrl\" value=\"{html.escape(radarr.get('url',''))}\" required></div>
-<div><label id=\"lRadarrApi\">Radarr API key *</label><input name=\"radarrApiKey\" value=\"{html.escape(radarr.get('apiKey',''))}\" required></div>
+<div><label id=\"lRadarrUrl\">Radarr URL *</label><input id=\"radarrUrl\" name=\"radarrUrl\" value=\"{html.escape(radarr.get('url',''))}\" required><div id=\"radarrUrlError\" class=\"field-error\"></div></div>
+<div><label id=\"lRadarrApi\">Radarr API key *</label><input id=\"radarrApiKey\" name=\"radarrApiKey\" value=\"{html.escape(radarr.get('apiKey',''))}\" required><div id=\"radarrApiError\" class=\"field-error\"></div></div>
+</div>
+<div class=\"grid\">
+<div><label id=\"lQuality\">Quality Profile</label><div style=\"display:flex;gap:8px;align-items:center\"><select id=\"qualityProfileId\" name=\"qualityProfileId\" style=\"flex:1\"><option value=\"{html.escape(str(radarr.get('qualityProfileId',1)))}\">Current ID {html.escape(str(radarr.get('qualityProfileId',1)))}</option></select><button id=\"refreshProfilesBtn\" class=\"btn-secondary\" type=\"button\" onclick=\"discoverRadarr(true)\">Refresh</button></div><div class=\"hint\">Kies direct het Radarr quality profile voor films.</div></div>
+<div><label id=\"lRoot\">Root Folder</label><input name=\"rootFolderPath\" id=\"rootFolderPath\" value=\"{html.escape(radarr.get('rootFolderPath','/movies'))}\"></div>
 </div>
 <div class=\"actions\" style=\"justify-content:flex-start\"><button id=\"autoBtn\" class=\"btn-secondary\" type=\"button\" onclick=\"discoverRadarr()\">Automatic detect</button></div>
-<input type=\"hidden\" name=\"qualityProfileId\" id=\"qualityProfileId\" value=\"{html.escape(str(radarr.get('qualityProfileId',1)))}\">
-<input type=\"hidden\" name=\"rootFolderPath\" id=\"rootFolderPath\" value=\"{html.escape(radarr.get('rootFolderPath','/movies'))}\">
 <details>
 <summary>Manual fallback (open als automatic detect niet werkt)</summary>
 <div class=\"grid\">
-<div><label id=\"lQuality\">Quality Profile ID</label><input id=\"manualQuality\" type=\"number\" value=\"{html.escape(str(radarr.get('qualityProfileId',1)))}\" oninput=\"qualityProfileId.value=this.value\"></div>
-<div><label id=\"lRoot\">Root Folder</label><input id=\"manualRoot\" value=\"{html.escape(radarr.get('rootFolderPath','/movies'))}\" oninput=\"rootFolderPath.value=this.value\"></div>
+<div><label id=\"lQualityManual\">Quality Profile ID</label><input id=\"manualQuality\" type=\"number\" value=\"{html.escape(str(radarr.get('qualityProfileId',1)))}\" oninput=\"qualityProfileId.value=this.value\"></div>
+<div><label id=\"lRootManual\">Root Folder</label><input id=\"manualRoot\" value=\"{html.escape(radarr.get('rootFolderPath','/movies'))}\" oninput=\"rootFolderPath.value=this.value\"></div>
 </div>
 <p class=\"hint\">Tip: alleen gebruiken als automatic detect geen folders/profiles vindt.</p>
 </details>
@@ -957,10 +961,39 @@ summary {{ cursor:pointer; color:#c9bcf0; font-weight:700; }}
 <div class=\"actions\"><button id=\"finishBtn\" type=\"submit\">Opslaan</button></div>
 </div></form>
 <script>
-async function discoverRadarr() {{
+function validateSetupFields() {{
+  let ok = true;
+  const urlEl = document.getElementById('radarrUrl');
+  const apiEl = document.getElementById('radarrApiKey');
+  const urlErr = document.getElementById('radarrUrlError');
+  const apiErr = document.getElementById('radarrApiError');
+  const url = (urlEl?.value || '').trim();
+  const api = (apiEl?.value || '').trim();
+  if (urlErr) urlErr.textContent = '';
+  if (apiErr) apiErr.textContent = '';
+  if (urlEl) urlEl.classList.remove('is-invalid');
+  if (apiEl) apiEl.classList.remove('is-invalid');
+  if (!url) {{
+    ok = false;
+    if (urlEl) urlEl.classList.add('is-invalid');
+    if (urlErr) urlErr.textContent = 'Radarr URL is verplicht.';
+  }} else if (!/^https?:\\/\\//i.test(url)) {{
+    ok = false;
+    if (urlEl) urlEl.classList.add('is-invalid');
+    if (urlErr) urlErr.textContent = 'Gebruik een geldige URL met http:// of https://';
+  }}
+  if (!api) {{
+    ok = false;
+    if (apiEl) apiEl.classList.add('is-invalid');
+    if (apiErr) apiErr.textContent = 'Radarr API key is verplicht.';
+  }}
+  return ok;
+}}
+async function discoverRadarr(refreshOnly) {{
+  if (!validateSetupFields()) return;
   const payload = {{
-    url: document.querySelector('input[name=\"radarrUrl\"]').value,
-    apiKey: document.querySelector('input[name=\"radarrApiKey\"]').value
+    url: document.getElementById('radarrUrl').value,
+    apiKey: document.getElementById('radarrApiKey').value
   }};
   const r = await fetch('/api/radarr/discover', {{
     method:'POST',
@@ -968,17 +1001,38 @@ async function discoverRadarr() {{
     body:JSON.stringify(payload)
   }});
   const j = await r.json();
-  if (!j.ok) {{ alert(j.message || 'Detectie mislukt, open Manual fallback.'); return; }}
+  if (!j.ok) {{
+    const urlEl = document.getElementById('radarrUrl');
+    const apiEl = document.getElementById('radarrApiKey');
+    if (urlEl) urlEl.classList.add('is-invalid');
+    if (apiEl) apiEl.classList.add('is-invalid');
+    alert(j.message || 'Detectie mislukt, controleer URL/API key.');
+    return;
+  }}
+  const q = document.getElementById('qualityProfileId');
   if (j.profiles && j.profiles.length) {{
-    document.getElementById('qualityProfileId').value = j.profiles[0].id;
+    const current = q ? String(q.value || '') : '';
+    if (q) q.innerHTML = '';
+    j.profiles.forEach((p) => {{
+      if (!q) return;
+      const opt = document.createElement('option');
+      opt.value = String(p.id);
+      opt.textContent = `${{p.name}} (ID ${{p.id}})`;
+      if (String(p.id) === current) opt.selected = true;
+      q.appendChild(opt);
+    }});
+    if (q && !q.value) q.value = String(j.profiles[0].id);
     const mq = document.getElementById('manualQuality'); if (mq) mq.value = j.profiles[0].id;
   }}
   if (j.folders && j.folders.length) {{
     document.getElementById('rootFolderPath').value = j.folders[0].path;
     const mr = document.getElementById('manualRoot'); if (mr) mr.value = j.folders[0].path;
   }}
-  alert('Automatic detect gelukt. Profiel en root folder zijn ingevuld.');
+  if (!refreshOnly) alert('Automatic detect gelukt. Profiel en root folder zijn ingevuld.');
 }}
+document.querySelector('form[action="/setup"]')?.addEventListener('submit', (e) => {{
+  if (!validateSetupFields()) e.preventDefault();
+}});
 const lang=(navigator.language||'en').toLowerCase().startsWith('nl')?'nl':((navigator.language||'en').toLowerCase().startsWith('de')?'de':'en');
 const t={{en:{{title:'Quick Start Checklist',sub:'Complete this once and you are ready.',api:'Radarr API key *',quality:'Quality Profile ID',root:'Root Folder',auto:'Automatic detect',finish:'Save setup'}},nl:{{title:'Snelle Start Checklist',sub:'Doorloop dit eenmalig en je bent klaar.',api:'Radarr API key *',quality:'Quality Profile ID',root:'Root Folder',auto:'Automatic detect',finish:'Opslaan'}},de:{{title:'Quick-Start Checkliste',sub:'Einmal durchgehen und fertig.',api:'Radarr API-Schlüssel *',quality:'Qualitätsprofil-ID',root:'Root-Ordner',auto:'Automatisch erkennen',finish:'Speichern'}}}}[lang];
 document.documentElement.lang=lang;setupTitle.textContent=t.title;setupSub.textContent=t.sub;lRadarrApi.textContent=t.api;lQuality.textContent=t.quality;lRoot.textContent=t.root;autoBtn.textContent=t.auto;finishBtn.textContent=t.finish;
