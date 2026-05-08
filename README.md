@@ -113,6 +113,7 @@ http://localhost:18080
 ```
 
 Change `DRIPARR_ADMIN_PASSWORD` and `DRIPARR_SESSION_SECRET` before first use.
+You can generate a random 64-character session secret with the [IT Tools token generator](https://it-tools.tech/token-generator?length=64&numbers=false).
 
 ## Portainer / NAS
 
