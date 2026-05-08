@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   driparr:
-    image: ghcr.io/sander1384/seerrdripfeed:latest
+    image: ghcr.io/sander1384/seerrdripfeed:v0.1.0
     container_name: driparr-app
     restart: unless-stopped
     ports:
