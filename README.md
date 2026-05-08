@@ -1,33 +1,65 @@
-# Driparr
+<p align="center">
+  <img src="assets/driparr.png" alt="Driparr" width="420">
+</p>
 
-Driparr sends IMDb lists to Radarr in small, controlled batches instead of flooding Radarr with a full list at once.
+<h1 align="center">Driparr</h1>
 
-It is meant for people who maintain large IMDb watchlists and want Radarr to add movies gradually, with a visible queue, duplicate protection, and an optional sync mode that waits for active downloads to finish before adding more.
+<p align="center">
+  Drip-feed IMDb CSV lists to Radarr in small, controlled batches.
+</p>
+
+<p align="center">
+  <a href="https://github.com/Sander1384/Drippar/releases/tag/v0.1.0"><img alt="Release" src="https://img.shields.io/github/v/release/Sander1384/Drippar?label=release"></a>
+  <a href="https://github.com/Sander1384/Drippar/actions/workflows/docker-publish.yml"><img alt="Docker build" src="https://img.shields.io/github/actions/workflow/status/Sander1384/Drippar/docker-publish.yml?branch=main&label=docker%20build"></a>
+  <a href="https://github.com/Sander1384/Drippar/pkgs/container/seerrdripfeed"><img alt="GHCR" src="https://img.shields.io/badge/GHCR-seerrdripfeed-blue"></a>
+  <img alt="Docker" src="https://img.shields.io/badge/docker-ready-2496ED">
+</p>
+
+## What Is Driparr?
+
+Driparr is a small self-hosted web app for people who keep large IMDb watchlists and want Radarr to add movies gradually instead of all at once.
+
+Import an IMDb CSV, review the queue, choose how quickly items should drip into Radarr, and let Driparr handle the pacing. It can also skip movies that Radarr already knows about and optionally wait for the current download to finish before adding the next item.
+
+> [!IMPORTANT]
+> Driparr is intentionally focused on IMDb CSV to Radarr. It is built for predictable, visible drip-feeding rather than broad list-sync automation.
+
+## Why Use It?
+
+- Avoid bulk-import spikes in Radarr.
+- Keep a visible queue of what will be added next.
+- Add only a small number of movies per interval.
+- Skip duplicates already present in Radarr.
+- Use sync mode for a one-at-a-time flow.
+- Run it easily in Docker or Portainer.
 
 ## Features
 
 - IMDb CSV import for movie and series exports.
-- Radarr setup from the web UI: URL, API key, quality profile, and root folder.
 - First-run onboarding checklist.
-- Duplicate filter: movies already known by Radarr are skipped automatically.
-- Drip-feed worker with configurable interval and max items per run.
-- Sync mode: wait for completion before dripping the next item.
+- Radarr connection test from the web UI.
+- Quality profile and root folder selection.
 - Queue overview with readable status and reasons.
+- Duplicate protection for existing Radarr movies.
+- Timed drip mode with configurable interval and batch size.
+- Sync drip mode that waits for active downloads to complete.
 - Run history for imported lists.
 - Optional webhook notifications.
-- Docker Compose and Portainer-friendly deployment.
+- Mock Radarr test stack for trying Driparr without a real Radarr instance.
 
-## Requirements
+## Supported
 
-- Radarr with API access enabled.
-- Docker Compose or Portainer.
-- An IMDb CSV export.
-
-To export your IMDb list, open the list on IMDb and use the built-in export option. Driparr reads IMDb IDs from the CSV.
+| Type | Supported |
+| --- | --- |
+| List input | IMDb CSV export |
+| Media manager | Radarr |
+| Deployment | Docker Compose, Portainer |
+| Image registry | GitHub Container Registry |
+| Test mode | Mock Radarr stack |
 
 ## Quick Start
 
-Create a folder for Driparr data:
+Create a folder for Driparr:
 
 ```bash
 mkdir -p ./driparr/data
@@ -65,25 +97,25 @@ Open:
 http://localhost:18080
 ```
 
-Before first use, change `DRIPARR_ADMIN_PASSWORD` and `DRIPARR_SESSION_SECRET` to strong unique values.
+Change `DRIPARR_ADMIN_PASSWORD` and `DRIPARR_SESSION_SECRET` before first use.
 
 ## Portainer / NAS
 
-Use [docker-compose.portainer.yml](./docker-compose.portainer.yml) as a starting point.
+Use [docker-compose.portainer.yml](./docker-compose.portainer.yml) as a ready-to-edit Portainer stack.
 
 Change at least:
 
 - `DRIPARR_ADMIN_PASSWORD`
 - `DRIPARR_SESSION_SECRET`
-- the volume path, for example `/volume1/docker/driparr/data:/app/data`
+- the host volume path, for example `/volume1/docker/driparr/data:/app/data`
 
-Then paste the compose file into Portainer:
+Deploy through:
 
 ```text
-Stacks -> Add stack -> Web editor
+Portainer -> Stacks -> Add stack -> Web editor
 ```
 
-Deploy the stack and open:
+Then open:
 
 ```text
 http://<NAS-IP>:18080
@@ -91,7 +123,7 @@ http://<NAS-IP>:18080
 
 ## First Setup
 
-1. Log in with the admin username and password from your compose environment.
+1. Log in with the admin username and password from your compose file.
 2. Enter your Radarr URL, for example `http://radarr:7878` or `http://192.168.1.50:7878`.
 3. Paste your Radarr API key.
 4. Click `Test` to fetch Radarr options.
@@ -101,14 +133,16 @@ http://<NAS-IP>:18080
 
 ## Drip Modes
 
-- `Timed`: add up to `maxItemsPerRun` items every interval.
-- `Sync`: add items only when the current Radarr download appears complete.
+| Mode | Behavior |
+| --- | --- |
+| Timed | Adds up to `maxItemsPerRun` items every configured interval. |
+| Sync | Waits until the current Radarr item appears complete before adding the next item. |
 
-Sync mode is useful when you want a true one-at-a-time flow. Timed mode is useful when you want predictable batches.
+Use `Timed` for predictable batches. Use `Sync` when you want a slower one-at-a-time flow.
 
 ## Test Without Real Radarr
 
-This repository includes a mock Radarr test stack.
+The repository includes a mock Radarr stack for browser testing:
 
 ```bash
 docker compose -f docker-compose.test.yml up -d --build
@@ -133,7 +167,7 @@ docker compose -f docker-compose.test.yml down
 
 ## Updating
 
-For the stable release tag, update the image tag in your compose file when a new release is available.
+For stable releases, update the image tag in your compose file when a new release is available.
 
 For automatic latest builds from `main`, use:
 
@@ -150,21 +184,21 @@ docker compose up -d
 
 ## Troubleshooting
 
-If Radarr test fails:
+### Radarr Test Fails
 
 - Check that Driparr can reach the Radarr URL from inside Docker.
-- Use the container name, such as `http://radarr:7878`, when both apps are on the same Docker network.
+- Use a container name such as `http://radarr:7878` when both apps are on the same Docker network.
 - Use the NAS or server IP when Radarr runs outside the Driparr stack.
 - Verify the Radarr API key.
 
-If no items are added:
+### No Items Are Added
 
 - Confirm the queue contains `todo` items.
 - Confirm the worker is enabled.
 - Check whether items were skipped because they already exist in Radarr.
 - In sync mode, check whether Radarr still has an active download.
 
-If login stops working after changing secrets:
+### Login Stops Working
 
 - Restart the container after changing `DRIPARR_SESSION_SECRET`.
 - Make sure the admin password in your compose file is the value you expect.
@@ -175,14 +209,12 @@ If login stops working after changing secrets:
 - Do not commit `.env`, local config files, cookies, or data volumes.
 - Rotate keys or passwords that were used during testing before opening the app to other users.
 
-## Release
+## Links
 
-Current public release:
+- [Latest release](https://github.com/Sander1384/Drippar/releases/tag/v0.1.0)
+- [Container image](https://github.com/Sander1384/Drippar/pkgs/container/seerrdripfeed)
+- [Docker workflow](https://github.com/Sander1384/Drippar/actions/workflows/docker-publish.yml)
 
-- [Driparr v0.1.0](https://github.com/Sander1384/Drippar/releases/tag/v0.1.0)
+## Credits
 
-Container image:
-
-```text
-ghcr.io/sander1384/seerrdripfeed:v0.1.0
-```
+Driparr was shaped with inspiration from the self-hosted Arr ecosystem and release-page structure from projects such as [Cleanuparr](https://github.com/Cleanuparr/Cleanuparr).
