@@ -1,8 +1,42 @@
-﻿import json
+import json
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 MOVIES = []
+DOWNLOADS = []
+
+
+def utc_iso(ts):
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
+
+
+def refresh_downloads():
+    now = time.time()
+    keep = []
+    for d in DOWNLOADS:
+        movie = next((m for m in MOVIES if int(m.get("id", 0)) == int(d.get("movieId", 0))), None)
+        if not movie:
+            continue
+        total = max(1, int(d.get("size", 1)))
+        start = float(d.get("startedAt", now))
+        duration = max(1.0, float(d.get("durationSec", 60.0)))
+        elapsed = max(0.0, now - start)
+        ratio = min(1.0, elapsed / duration)
+        left = int(max(0, total * (1.0 - ratio)))
+        if ratio >= 1.0:
+            movie["hasFile"] = True
+            movie["movieFile"] = {"quality": "Mock", "size": total}
+            continue
+        d["sizeleft"] = left
+        eta_ts = now + (duration - elapsed)
+        d["estimatedCompletionTime"] = utc_iso(eta_ts)
+        d["timeleft"] = d["estimatedCompletionTime"]
+        d["status"] = "downloading"
+        d["trackedDownloadState"] = "downloading"
+        keep.append(d)
+    DOWNLOADS[:] = keep
+
 
 def json_response(handler, status, payload):
     body = json.dumps(payload).encode("utf-8")
@@ -26,7 +60,12 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, 200, [{"path": "/movies"}])
             return
         if path.path == "/api/v3/movie":
+            refresh_downloads()
             json_response(self, 200, MOVIES)
+            return
+        if path.path == "/api/v3/queue":
+            refresh_downloads()
+            json_response(self, 200, DOWNLOADS)
             return
         if path.path == "/api/v3/movie/lookup":
             q = parse_qs(path.query)
@@ -59,7 +98,31 @@ class Handler(BaseHTTPRequestHandler):
                 if int(movie.get("tmdbId", 0)) == tmdb_id:
                     json_response(self, 409, {"message": "Already exists"})
                     return
-            MOVIES.append({"id": len(MOVIES) + 1, "title": f"Movie {tmdb_id}", "tmdbId": tmdb_id})
+            movie_id = len(MOVIES) + 1
+            MOVIES.append(
+                {
+                    "id": movie_id,
+                    "title": f"Movie {tmdb_id}",
+                    "tmdbId": tmdb_id,
+                    "hasFile": False,
+                    "movieFile": None,
+                }
+            )
+            DOWNLOADS.append(
+                {
+                    "id": movie_id,
+                    "movieId": movie_id,
+                    "title": f"Movie {tmdb_id}",
+                    "size": 1_000_000_000,
+                    "sizeleft": 1_000_000_000,
+                    "estimatedCompletionTime": utc_iso(time.time() + 90),
+                    "timeleft": utc_iso(time.time() + 90),
+                    "status": "downloading",
+                    "trackedDownloadState": "downloading",
+                    "startedAt": time.time(),
+                    "durationSec": 90.0,
+                }
+            )
             json_response(self, 201, MOVIES[-1])
             return
         json_response(self, 404, {"error": "not found"})

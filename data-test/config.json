@@ -5,9 +5,12 @@
     "maxItemsPerRun": 1,
     "workerEnabled": false,
     "dripMode": "sync",
-    "tmdbImporterEnabled": true,
+    "tmdbImporterEnabled": false,
     "imdbImporterEnabled": true,
-    "onboardingDismissed": true
+    "onboardingDismissed": true,
+    "notifyEnabled": false,
+    "notifyWebhookUrl": "",
+    "runHistory": []
   },
   "radarr": {
     "enabled": true,

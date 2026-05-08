@@ -24,12 +24,28 @@ QUEUE_PATH = DATA / "queue.csv"
 QUEUE_FIELDS = ["type", "externalId", "title", "status", "source", "addedAt", "error"]
 LOCK = threading.Lock()
 LAST_RUN = {"at": None, "message": "Worker nog niet gestart."}
+LAST_EVENTS = []
 SESSIONS = {}
 SESSION_TTL_SECONDS = 60 * 60 * 12
+MAX_REQUEST_BYTES = 2 * 1024 * 1024
+MAX_CSV_CHARS = 2 * 1024 * 1024
 
 
 def utc_now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def push_event(level, title, detail=""):
+    LAST_EVENTS.insert(
+        0,
+        {
+            "at": utc_now(),
+            "level": str(level or "info"),
+            "title": str(title or ""),
+            "detail": str(detail or ""),
+        },
+    )
+    del LAST_EVENTS[80:]
 
 
 def safe_int(value, default, minimum=None, maximum=None):
@@ -103,9 +119,12 @@ def default_config():
             "maxItemsPerRun": 1,
             "workerEnabled": False,
             "dripMode": "sync",
-            "tmdbImporterEnabled": True,
-            "imdbImporterEnabled": False,
+            "tmdbImporterEnabled": False,
+            "imdbImporterEnabled": True,
             "onboardingDismissed": False,
+            "notifyEnabled": False,
+            "notifyWebhookUrl": "",
+            "runHistory": [],
         },
         "radarr": {
             "enabled": True,
@@ -137,14 +156,83 @@ def read_config():
 
     app_cfg = config.setdefault("app", {})
     if "tmdbImporterEnabled" not in app_cfg:
-        app_cfg["tmdbImporterEnabled"] = True
+        app_cfg["tmdbImporterEnabled"] = False
     if "imdbImporterEnabled" not in app_cfg:
-        app_cfg["imdbImporterEnabled"] = False
+        app_cfg["imdbImporterEnabled"] = True
     if app_cfg.get("dripMode") not in ("timed", "sync"):
         app_cfg["dripMode"] = "sync"
     if "onboardingDismissed" not in app_cfg:
         app_cfg["onboardingDismissed"] = False
+    if "notifyEnabled" not in app_cfg:
+        app_cfg["notifyEnabled"] = False
+    if "notifyWebhookUrl" not in app_cfg:
+        app_cfg["notifyWebhookUrl"] = ""
+    if "runHistory" not in app_cfg or not isinstance(app_cfg.get("runHistory"), list):
+        app_cfg["runHistory"] = []
     return config
+
+
+def queue_stats_for_source(rows, source_name):
+    src = str(source_name or "").strip()
+    scoped = [r for r in rows if str(r.get("source", "")).strip() == src]
+    total = len(scoped)
+    todo = len([r for r in scoped if r.get("status") == "todo"])
+    added = len([r for r in scoped if r.get("status") == "added"])
+    skipped = len([r for r in scoped if r.get("status") == "skipped"])
+    failed = len([r for r in scoped if r.get("status") == "failed"])
+    return {"total": total, "todo": todo, "added": added, "skipped": skipped, "failed": failed}
+
+
+def push_run_history(config, entry):
+    app_cfg = config.setdefault("app", {})
+    history = app_cfg.setdefault("runHistory", [])
+    history.insert(0, entry)
+    del history[80:]
+
+
+def refresh_run_history(config, rows):
+    app_cfg = config.setdefault("app", {})
+    history = app_cfg.setdefault("runHistory", [])
+    changed = False
+    for run in history:
+        source_name = run.get("listName", "")
+        stats = queue_stats_for_source(rows, source_name)
+        run["done"] = int(stats["total"] - stats["todo"])
+        run["total"] = int(stats["total"])
+        run["added"] = int(stats["added"])
+        run["skipped"] = int(stats["skipped"])
+        run["failed"] = int(stats["failed"])
+        if stats["total"] > 0 and stats["todo"] == 0 and run.get("status") != "completed":
+            run["status"] = "completed"
+            run["completedAt"] = utc_now()
+            changed = True
+    return changed
+
+
+def send_webhook_notification(config, event_type, title, detail="", payload_extra=None):
+    app_cfg = config.get("app", {})
+    if not bool(app_cfg.get("notifyEnabled")):
+        return
+    webhook = str(app_cfg.get("notifyWebhookUrl", "")).strip()
+    if not webhook:
+        return
+    parsed = urlparse(webhook)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise RuntimeError("Webhook URL moet een geldige http(s) URL zijn.")
+    payload = {
+        "event": str(event_type or "info"),
+        "title": str(title or ""),
+        "detail": str(detail or ""),
+        "at": utc_now(),
+    }
+    if isinstance(payload_extra, dict):
+        payload["data"] = payload_extra
+    body = json.dumps(payload).encode("utf-8")
+    request = Request(webhook, data=body, method="POST")
+    request.add_header("Content-Type", "application/json")
+    request.add_header("User-Agent", "Driparr-Notifier/1.0")
+    with urlopen(request, timeout=8) as _response:
+        return
 
 
 def save_config(config):
@@ -361,7 +449,7 @@ def enqueue_ids(config, media_type, id_kind, ids, source_name):
                         or radarr_has_tmdb(config, int(tmdb_for_check))
                     ):
                         status = "skipped"
-                        reason = "Bestaat al in Radarr op TMDb ID (gefilterd bij import)."
+                        reason = "Bestaat al in Radarr (gefilterd bij import)."
                 if status == "todo" and display_title and radarr_index:
                     title_norm, year = parse_title_year(display_title)
                     if title_norm and year and (title_norm, year) in radarr_index["title_year"]:
@@ -396,16 +484,12 @@ def enqueue_ids(config, media_type, id_kind, ids, source_name):
 
 def import_list(source_type, url, media_type, name):
     config = read_config()
-    if source_type == "tmdb" and not config["app"].get("tmdbImporterEnabled", True):
-        raise RuntimeError("TMDb import staat uit. Activeer deze eerst in General settings.")
-    if source_type == "imdb" and not config["app"].get("imdbImporterEnabled", False):
-        raise RuntimeError("IMDb import staat uit. Activeer deze eerst in General settings.")
-
     if source_type == "tmdb":
-        body = fetch_text(url, timeout=35, retries=2)
-        ids = tmdb_ids_from_text(body + "\n" + url)
-        id_kind = "tmdb"
-    elif source_type == "imdb":
+        raise RuntimeError("TMDb import is verwijderd in deze IMDb-only versie.")
+    if source_type == "imdb" and not config["app"].get("imdbImporterEnabled", True):
+        raise RuntimeError("IMDb import staat uit.")
+
+    if source_type == "imdb":
         ids = imdb_ids_from_url(url)
         id_kind = "imdb"
     else:
@@ -421,7 +505,7 @@ def radarr_payload(config, item):
     if kind == "imdb":
         value = resolve_tmdb_from_imdb(config, value)
         if not value:
-            raise RuntimeError(f"IMDb kon niet naar TMDb worden vertaald: {item['externalId']}")
+            raise RuntimeError(f"IMDb ID kon niet worden verwerkt: {item['externalId']}")
     elif kind != "tmdb":
         raise RuntimeError("Onbekend ID type voor Radarr.")
     radarr = config["radarr"]
@@ -548,6 +632,31 @@ def current_movie_eta(config, item):
     return ""
 
 
+def current_movie_progress(config, item):
+    if not item or item.get("type") != "movie":
+        return {"eta": "", "percent": None, "status": ""}
+    try:
+        movies = service_request(config["radarr"], "GET", "/movie")
+        movie = find_existing_movie(movies, item.get("externalId", ""))
+        if not movie:
+            return {"eta": "", "percent": None, "status": ""}
+        queue = service_request(config["radarr"], "GET", "/queue")
+        for entry in queue or []:
+            if entry.get("movieId") == movie.get("id"):
+                eta = entry.get("estimatedCompletionTime") or entry.get("timeleft")
+                eta_text = format_eta_from_iso(eta)
+                size = entry.get("size")
+                left = entry.get("sizeleft")
+                percent = None
+                if isinstance(size, (int, float)) and size > 0 and isinstance(left, (int, float)):
+                    percent = max(0, min(100, int(round((1 - (left / size)) * 100))))
+                status = entry.get("status") or entry.get("trackedDownloadState") or "Downloading"
+                return {"eta": eta_text, "percent": percent, "status": str(status)}
+    except Exception:
+        pass
+    return {"eta": "", "percent": None, "status": ""}
+
+
 def discover_radarr_options(service):
     profiles = service_request(service, "GET", "/qualityprofile")
     folders = service_request(service, "GET", "/rootfolder")
@@ -560,6 +669,7 @@ def discover_radarr_options(service):
 def process_once(force=False):
     config = read_config()
     rows = read_queue()
+    changed = False
     drip_mode = config["app"].get("dripMode", "sync")
 
     if drip_mode == "sync" and not force:
@@ -596,7 +706,9 @@ def process_once(force=False):
                     item["status"] = "skipped"
                     item["error"] = "Bestaat al in Radarr (duplicate voorkomen)."
                     item["addedAt"] = utc_now()
+                    changed = True
                     LAST_RUN.update({"at": item["addedAt"], "message": f"Overgeslagen (al aanwezig): {item['title']}"})
+                    push_event("skipped", item["title"], "Already exists in Radarr")
                     continue
                 service_request(config["radarr"], "POST", "/movie", payload)
             elif item["type"] == "series":
@@ -608,7 +720,9 @@ def process_once(force=False):
                     item["status"] = "skipped"
                     item["error"] = "Bestaat al in Sonarr (duplicate voorkomen)."
                     item["addedAt"] = utc_now()
+                    changed = True
                     LAST_RUN.update({"at": item["addedAt"], "message": f"Overgeslagen (al aanwezig): {item['title']}"})
+                    push_event("skipped", item["title"], "Already exists in Sonarr")
                     continue
                 service_request(config["sonarr"], "POST", "/series", payload)
             else:
@@ -616,19 +730,36 @@ def process_once(force=False):
             item["status"] = "added"
             item["addedAt"] = utc_now()
             item["error"] = ""
+            changed = True
             LAST_RUN.update({"at": item["addedAt"], "message": f"Toegevoegd: {item['title']}"})
+            push_event("added", item["title"], "Added to downloader")
         except RuntimeError as error:
             error_text = str(error)
-            if "IMDb kon niet naar TMDb worden vertaald" in error_text:
+            if "IMDb ID kon niet worden verwerkt" in error_text:
                 item["status"] = "skipped"
                 item["error"] = f"Niet resolvebaar: {error_text}"
                 item["addedAt"] = utc_now()
+                changed = True
                 LAST_RUN.update({"at": item["addedAt"], "message": f"Overgeslagen (niet resolvebaar): {item['title']}"})
+                push_event("skipped", item["title"], "Unresolvable IMDb mapping")
             else:
                 item["status"] = "failed"
                 item["error"] = error_text
+                changed = True
                 LAST_RUN.update({"at": utc_now(), "message": f"Fout bij {item['title']}: {error}"})
+                push_event("failed", item["title"], error_text)
+                try:
+                    send_webhook_notification(config, "run_failed", item["title"], error_text, {"externalId": item.get("externalId", "")})
+                except Exception:
+                    pass
     write_queue(rows)
+    if changed:
+        if refresh_run_history(config, rows):
+            try:
+                send_webhook_notification(config, "list_completed", "Lijst afgerond", "Een lijst heeft geen open todo-items meer.")
+            except Exception:
+                pass
+        save_config(config)
 
 
 def worker_loop():
@@ -735,7 +866,7 @@ summary {{ cursor:pointer; color:#c9bcf0; font-weight:700; }}
 <div class=\"content\">
 <ul class=\"checklist\">
 <li><div class=\"left\"><span class=\"dot\"><img src=\"/assets/link.svg\" alt=\"\"></span><span>Koppel Radarr.</span></div><span>•</span></li>
-<li><div class=\"left\"><span class=\"dot\"><img src=\"/assets/add.svg\" alt=\"\"></span><span>Voeg een IMDb/TMDb lijst toe.</span></div><span>•</span></li>
+<li><div class=\"left\"><span class=\"dot\"><img src=\"/assets/add.svg\" alt=\"\"></span><span>Importeer een IMDb CSV-lijst.</span></div><span>•</span></li>
 <li><div class=\"left\"><span class=\"dot\"><img src=\"/assets/water-drop.svg\" alt=\"\"></span><span>Kies dripmodus en interval.</span></div><span>•</span></li>
 <li><div class=\"left\"><span class=\"dot\"><img src=\"/assets/toggle.svg\" alt=\"\"></span><span>Zet de worker aan.</span></div><span>•</span></li>
 </ul>
@@ -755,10 +886,6 @@ summary {{ cursor:pointer; color:#c9bcf0; font-weight:700; }}
 </div>
 <p class=\"hint\">Tip: alleen gebruiken als automatic detect geen folders/profiles vindt.</p>
 </details>
-<div class=\"grid\" style=\"margin-top:12px\">
-<div class=\"switch-row\"><span id=\"lTmdb\">TMDb importer</span><label class=\"switch\"><input id=\"setupTmdbEnabled\" class=\"switch-input\" type=\"checkbox\" name=\"tmdbImporterEnabled\" {'checked' if config.get('app',{}).get('tmdbImporterEnabled', True) else ''}><span class=\"switch-slider\"></span></label></div>
-<div class=\"switch-row\"><span id=\"lImdb\">IMDb importer</span><label class=\"switch\"><input id=\"setupImdbEnabled\" class=\"switch-input\" type=\"checkbox\" name=\"imdbImporterEnabled\" {'checked' if config.get('app',{}).get('imdbImporterEnabled', False) else ''}><span class=\"switch-slider\"></span></label></div>
-</div>
 </div>
 {err}
 <div class=\"actions\"><button id=\"finishBtn\" type=\"submit\">Opslaan</button></div>
@@ -787,21 +914,8 @@ async function discoverRadarr() {{
   alert('Automatic detect gelukt. Profiel en root folder zijn ingevuld.');
 }}
 const lang=(navigator.language||'en').toLowerCase().startsWith('nl')?'nl':((navigator.language||'en').toLowerCase().startsWith('de')?'de':'en');
-const t={{en:{{title:'Quick Start Checklist',sub:'Complete this once and you are ready.',api:'Radarr API key *',quality:'Quality Profile ID',root:'Root Folder',tmdb:'TMDb importer',imdb:'IMDb importer',auto:'Automatic detect',finish:'Save setup'}},nl:{{title:'Snelle Start Checklist',sub:'Doorloop dit eenmalig en je bent klaar.',api:'Radarr API key *',quality:'Quality Profile ID',root:'Root Folder',tmdb:'TMDb importer',imdb:'IMDb importer',auto:'Automatic detect',finish:'Opslaan'}},de:{{title:'Quick-Start Checkliste',sub:'Einmal durchgehen und fertig.',api:'Radarr API-Schlüssel *',quality:'Qualitätsprofil-ID',root:'Root-Ordner',tmdb:'TMDb-Importer',imdb:'IMDb-Importer',auto:'Automatisch erkennen',finish:'Speichern'}}}}[lang];
-document.documentElement.lang=lang;setupTitle.textContent=t.title;setupSub.textContent=t.sub;lRadarrApi.textContent=t.api;lQuality.textContent=t.quality;lRoot.textContent=t.root;lTmdb.textContent=t.tmdb;lImdb.textContent=t.imdb;autoBtn.textContent=t.auto;finishBtn.textContent=t.finish;
-const setupTmdb = document.getElementById('setupTmdbEnabled');
-const setupImdb = document.getElementById('setupImdbEnabled');
-function syncSetupSource(from) {{
-  if (!setupTmdb || !setupImdb) return;
-  if (from === 'tmdb' && setupTmdb.checked) setupImdb.checked = false;
-  if (from === 'imdb' && setupImdb.checked) setupTmdb.checked = false;
-  if (!setupTmdb.checked && !setupImdb.checked) setupTmdb.checked = true;
-}}
-if (setupTmdb && setupImdb) {{
-  setupTmdb.addEventListener('change', () => syncSetupSource('tmdb'));
-  setupImdb.addEventListener('change', () => syncSetupSource('imdb'));
-  syncSetupSource('tmdb');
-}}
+const t={{en:{{title:'Quick Start Checklist',sub:'Complete this once and you are ready.',api:'Radarr API key *',quality:'Quality Profile ID',root:'Root Folder',auto:'Automatic detect',finish:'Save setup'}},nl:{{title:'Snelle Start Checklist',sub:'Doorloop dit eenmalig en je bent klaar.',api:'Radarr API key *',quality:'Quality Profile ID',root:'Root Folder',auto:'Automatic detect',finish:'Opslaan'}},de:{{title:'Quick-Start Checkliste',sub:'Einmal durchgehen und fertig.',api:'Radarr API-Schlüssel *',quality:'Qualitätsprofil-ID',root:'Root-Ordner',auto:'Automatisch erkennen',finish:'Speichern'}}}}[lang];
+document.documentElement.lang=lang;setupTitle.textContent=t.title;setupSub.textContent=t.sub;lRadarrApi.textContent=t.api;lQuality.textContent=t.quality;lRoot.textContent=t.root;autoBtn.textContent=t.auto;finishBtn.textContent=t.finish;
 </script>
 </body></html>"""
 
@@ -838,6 +952,27 @@ def page(config, queue):
             return True
         except Exception:
             return False
+    def present_queue_reason(row, todo_positions):
+        status = str(row.get("status", "")).strip().lower()
+        external_id = str(row.get("externalId", "")).strip()
+        if status == "todo":
+            pos = todo_positions.get(external_id)
+            if isinstance(pos, int):
+                return f"In wachtrij, plek #{pos} voor volgende drip"
+            return "In wachtrij voor volgende drip"
+        if status == "skipped":
+            return "Al in bibliotheek"
+        reason = str(row.get("error", "")).strip()
+        if not reason:
+            return ""
+        lowered = reason.lower()
+        if lowered.startswith("niet resolvebaar: imdb kon niet naar tmdb worden vertaald:"):
+            return ""
+        if lowered.startswith("niet resolvebaar: imdb id kon niet worden verwerkt:"):
+            return ""
+        if lowered.startswith("imdb id kon niet worden verwerkt:"):
+            return ""
+        return reason
 
     radarr_connected = connected(config.get("radarr", {}))
     sonarr_connected = connected(config.get("sonarr", {}))
@@ -852,8 +987,16 @@ def page(config, queue):
     completed = [r for r in queue if r.get("status") == "added"]
     skipped = [r for r in queue if r.get("status") == "skipped"]
     failed = [r for r in queue if r.get("status") == "failed"]
+    todo_positions = {}
+    pos_counter = 1
+    for row in queue:
+        if str(row.get("status", "")).strip().lower() == "todo":
+            key = str(row.get("externalId", "")).strip()
+            if key:
+                todo_positions[key] = pos_counter
+                pos_counter += 1
     queue_rows = "\n".join(
-        f"<tr><td>{html.escape(row['type'])}</td><td>{html.escape(row['title'])}</td><td>{html.escape(row['externalId'])}</td><td><span class='pill {html.escape(row['status'])}'>{html.escape(row['status'])}</span></td><td>{html.escape(row['source'])}</td><td>{html.escape(row.get('error',''))}</td></tr>"
+        f"<tr><td>{html.escape(row['type'])}</td><td>{html.escape(row['title'])}</td><td>{html.escape(row['externalId'])}</td><td><span class='pill {html.escape(row['status'])}'>{html.escape(row['status'])}</span></td><td>{html.escape(row['source'])}</td><td>{html.escape(present_queue_reason(row, todo_positions))}</td></tr>"
         for row in queue[-140:]
     )
     queued_rows = "\n".join(
@@ -866,9 +1009,25 @@ def page(config, queue):
         reverse=True,
     )
     current_item = latest_completed[0] if latest_completed else None
-    current_eta = current_movie_eta(config, current_item) if current_item else ""
+    progress = current_movie_progress(config, current_item) if current_item else {"eta": "", "percent": None, "status": ""}
+    current_eta = progress.get("eta", "")
+    progress_percent = progress.get("percent")
+    progress_status = progress.get("status", "")
+    total_items = len(queue)
+    done_items = len(completed)
+    skipped_items = len(skipped)
+    summary_text = f"{done_items}/{total_items} - skipped {skipped_items}" if total_items else "0/0 - skipped 0"
+    event_rows = "\n".join(
+        f"<li><span><span class='pill event-pill {html.escape(e.get('level','info'))}'>{html.escape(e.get('level','info'))}</span> {html.escape(e.get('title',''))}</span><small>{html.escape(e.get('detail',''))}</small></li>"
+        for e in LAST_EVENTS[:10]
+    ) or "<li><span>Nog geen events</span><small>Acties van Driparr verschijnen hier.</small></li>"
+    current_progress_html = (
+        f"<div class='progress-wrap'><div class='progress-label'>{html.escape(progress_status)} {html.escape(current_eta)}</div><div class='progress-track'><div class='progress-fill' style='width:{int(progress_percent)}%'></div></div></div>"
+        if current_item and isinstance(progress_percent, int)
+        else (f"<small>{html.escape(current_eta)}</small>" if current_item else "<small></small>")
+    )
     current_drip_row = (
-        f"<li class='timeline-item timeline-current'><span class='dot'><img src='/assets/water-drop.svg' alt='Current'></span><div><span class='badge b-blue'>Current</span><span>{html.escape(current_item['title'])}</span><small>{html.escape(current_eta)}</small></div></li>"
+        f"<li class='timeline-item timeline-current'><span class='dot'><img src='/assets/water-drop.svg' alt='Current'></span><div><span class='badge b-blue'>Current</span><span>{html.escape(current_item['title'])}</span>{current_progress_html}</div></li>"
         if current_item
         else "<li class='timeline-item timeline-current'><span class='dot'><img src='/assets/water-drop.svg' alt='Current'></span><div><span class='badge b-blue'>Current</span><span>Nog geen actieve drip</span><small></small></div></li>"
     )
@@ -881,13 +1040,30 @@ def page(config, queue):
         bool(app_cfg.get("setupComplete")) and not bool(app_cfg.get("onboardingDismissed", False))
     )
     skipped_rows = "\n".join(
-        f"<li><span>{html.escape(r['title'])}</span><small>{html.escape(r.get('error','Already in library'))}</small></li>"
+        f"<li><span>{html.escape(r['title'])}</span><small><img src='/assets/check.svg' alt='In bibliotheek' style='width:14px;height:14px;display:block;filter:invert(72%) sepia(28%) saturate(889%) hue-rotate(89deg) brightness(95%) contrast(92%);'></small></li>"
         for r in skipped[:12]
-    ) or "<li><span>Geen bestaande films gedetecteerd</span><small>Alles klaar om te drippen</small></li>"
+    ) or "<li><span>Geen bestaande films gedetecteerd</span><small><img src='/assets/check.svg' alt='Klaar' style='width:14px;height:14px;display:block;filter:invert(72%) sepia(28%) saturate(889%) hue-rotate(89deg) brightness(95%) contrast(92%);'></small></li>"
+    progress_by_source = {}
+    for row in queue:
+        source = str(row.get("source", "")).strip()
+        if not source:
+            continue
+        bucket = progress_by_source.setdefault(source, {"total": 0, "done": 0, "todo": 0})
+        bucket["total"] += 1
+        if row.get("status") == "todo":
+            bucket["todo"] += 1
+        else:
+            bucket["done"] += 1
     list_rows = "\n".join(
-        f"<tr><td>{i + 1}</td><td>{html.escape(item.get('name',''))}</td><td>{html.escape(item.get('type',''))}</td><td>{html.escape(item.get('mediaType',''))}</td><td>{html.escape(item.get('url','CSV import'))}</td><td><button class='btn danger' onclick='deleteList({i})'>Delete</button></td></tr>"
+        (
+            f"<tr><td>{i + 1}</td><td>{html.escape(item.get('name',''))}</td><td>{html.escape(item.get('type',''))}</td><td>{html.escape(item.get('mediaType',''))}</td><td>{html.escape(item.get('url','CSV import'))}</td><td><span class='pill {'added' if ((progress_by_source.get(str(item.get('name','')).strip(),{}).get('todo',0)==0) and (progress_by_source.get(str(item.get('name','')).strip(),{}).get('total',0)>0)) else 'todo'}'>{progress_by_source.get(str(item.get('name','')).strip(),{}).get('done',0)}/{progress_by_source.get(str(item.get('name','')).strip(),{}).get('total',0)}{' klaar' if ((progress_by_source.get(str(item.get('name','')).strip(),{}).get('todo',0)==0) and (progress_by_source.get(str(item.get('name','')).strip(),{}).get('total',0)>0)) else ''}</span></td><td><button class='btn danger' onclick='deleteList({i})'>Delete</button></td></tr>"
+        )
         for i, item in enumerate(config.get("lists", []))
-    ) or "<tr><td colspan='6' style='color:#a49ac2'>Nog geen opgeslagen lijsten</td></tr>"
+    ) or "<tr><td colspan='7' style='color:#a49ac2'>Nog geen opgeslagen lijsten</td></tr>"
+    run_history_rows = "\n".join(
+        f"<tr><td>{html.escape(format_time_only(r.get('at')))}</td><td>{html.escape(r.get('listName',''))}</td><td>{int(r.get('done',0))}/{int(r.get('total',0))}</td><td><span class='pill {'added' if r.get('status') == 'completed' else 'todo'}'>{html.escape(r.get('status','queued'))}</span></td><td>{int(r.get('added',0))}/{int(r.get('skipped',0))}/{int(r.get('failed',0))}</td></tr>"
+        for r in config.get("app", {}).get("runHistory", [])[:12]
+    ) or "<tr><td colspan='5' style='color:#a49ac2'>Nog geen run history</td></tr>"
     return f"""<!doctype html><html lang=\"nl\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Driparr</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&display=swap');
@@ -906,13 +1082,21 @@ input:focus,select:focus {{ outline:none; border-color:#8661eb; box-shadow:0 0 0
 .actions {{ display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; }} .btn {{ border:0; border-radius:10px; padding:11px 14px; color:white; background:linear-gradient(130deg,#8f62ff,#6635e8); font-weight:800; cursor:pointer; transition:.2s ease; box-shadow:0 10px 22px rgba(99,53,232,.35); }}
 .btn:hover {{ transform:translateY(-1px); box-shadow:0 14px 28px rgba(99,53,232,.42); filter:brightness(1.05); }}
 .btn.secondary {{ background:#26163f; border:1px solid #4a3b67; box-shadow:none; }} .btn.secondary:hover {{ box-shadow:0 10px 22px rgba(0,0,0,.3); }} .btn.danger {{ background:#d73b58; }}
+.file-input-hidden {{ position:absolute !important; width:1px !important; height:1px !important; opacity:0 !important; pointer-events:none !important; }}
+.file-picker {{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; width:100%; }}
+.file-trigger {{ display:inline-flex; align-items:center; gap:8px; border:1px solid #5d48a0; background:linear-gradient(135deg,#2b1a4b,#24153f); color:#efe8ff; border-radius:10px; padding:10px 14px; font-weight:700; cursor:pointer; transition:.2s ease; }}
+.file-trigger:hover {{ border-color:#8a6cff; box-shadow:0 8px 24px rgba(93,72,160,.35); transform:translateY(-1px); }}
+.file-chip {{ flex:1; min-width:220px; border:1px dashed #4d3a86; background:#120b26; border-radius:10px; padding:10px 12px; color:#bdb1e3; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
+.file-chip.has-file {{ border-style:solid; border-color:#6e54c5; color:#e9e1ff; background:#1a1330; }}
 table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-bottom:1px solid #312453; text-align:left; }} th {{ color:#a79ac9; font-size:12px; text-transform:uppercase; letter-spacing:.35px; }}
 .pill {{ display:inline-block; border-radius:7px; padding:3px 8px; font-size:12px; font-weight:700; }} .pill.todo {{ background:#392c11; color:var(--yellow); }} .pill.added {{ background:#123425; color:var(--green); }} .pill.failed {{ background:#3a1320; color:var(--red); }} .pill.skipped {{ background:#2d2742; color:#cbb9ff; }}
 .feed-list {{ background:#100a20; border:1px solid #2f2450; border-radius:12px; padding:12px; }}
 .feed-list h3 {{ margin:2px 0 10px; font-size:16px; }} .feed-list ul {{ list-style:none; margin:0; padding:0; max-height:270px; overflow:auto; }} .feed-list li {{ display:flex; justify-content:space-between; gap:10px; padding:7px 6px; border-bottom:1px solid #2a1f44; }}
 .feed-list li span {{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }} .feed-list li small {{ color:#a49ac2; font-size:12px; }}
+.dashboard-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }}
 .drip-card {{ padding:0; overflow:hidden; }}
 .drip-header {{ display:flex; justify-content:space-between; align-items:center; padding:14px 16px; border-bottom:1px solid #2e244a; }}
+.drip-stats {{ color:#d2c7f6; font-size:13px; font-weight:700; }}
 .view-all {{ color:#9f7cff; font-weight:700; cursor:pointer; text-decoration:none; }}
 .timeline {{ padding:10px 14px 16px; }}
 .timeline ul {{ list-style:none; margin:0; padding:0; }}
@@ -927,6 +1111,14 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 .badge img {{ width:12px; height:12px; object-fit:contain; }}
 .b-orange {{ background:#3f2d11; color:#ffbe3d; }} .b-blue {{ background:#14254f; color:#8fb2ff; }} .b-green {{ background:#113826; color:#66e7aa; }}
 .line-title {{ display:block; }} .line-sub {{ color:#a49ac2; font-size:12px; }}
+.progress-wrap {{ margin-top:6px; }}
+.progress-label {{ font-size:12px; color:#9cb8ff; margin-bottom:4px; }}
+.progress-track {{ height:7px; border-radius:999px; background:#1f2d55; border:1px solid #37508a; overflow:hidden; }}
+.progress-fill {{ height:100%; background:linear-gradient(90deg,#56a2ff,#7a66ff); box-shadow:0 0 10px rgba(86,162,255,.45); }}
+.event-pill.info {{ background:#1a2d52; color:#7db0ff; }}
+.event-pill.added {{ background:#113826; color:#66e7aa; }}
+.event-pill.skipped {{ background:#3f2d11; color:#ffbe3d; }}
+.event-pill.failed {{ background:#3a1320; color:#ff809c; }}
 .instance-card {{ display:flex; justify-content:space-between; align-items:center; gap:10px; }} .instance-title {{ font-size:22px; font-weight:800; }} .enabled-pill {{ background:#123c2a; color:#3fe08f; padding:4px 8px; border-radius:7px; font-size:12px; font-weight:700; }} .disabled-pill {{ background:#3b1622; color:#ff7f96; padding:4px 8px; border-radius:7px; font-size:12px; font-weight:700; border:1px solid #7f3247; }} .instance-actions {{ display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }}
 .connected-pill {{ margin-left:auto; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; }}
 .connected-on {{ background:#123c2a; color:#3fe08f; border:1px solid #1d6546; }}
@@ -995,6 +1187,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
   nav button .connected-pill {{ display:none; }}
   main {{ padding:14px; }}
   .grid,.statrow {{ grid-template-columns:1fr; }}
+  .dashboard-grid {{ grid-template-columns:1fr; }}
   .panel {{ padding:14px; margin-top:10px; border-radius:11px; }}
   h1 {{ font-size:28px; }}
   .sub {{ margin-bottom:12px; font-size:14px; }}
@@ -1020,7 +1213,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 </nav></aside><main>
 <section id=\"dashboard\" class=\"tab active\"><h1 data-i18n=\"dashboard\">Dashboard</h1><p class=\"sub\" data-i18n=\"dashboard_sub\">Live overzicht van queue, huidige drip en afgeronde items.</p>
 <div class=\"panel drip-card\">
-  <div class=\"drip-header\"><b data-i18n=\"drip_timeline\">Drip Timeline</b><a class=\"view-all\" href=\"#\" onclick=\"openTab('queue');return false;\" data-i18n=\"view_all_queue\">View all queue</a></div>
+  <div class=\"drip-header\"><b data-i18n=\"drip_timeline\">Drip Timeline</b><span class=\"drip-stats\">{summary_text}</span><a class=\"view-all\" href=\"#\" onclick=\"openTab('queue');return false;\" data-i18n=\"view_all_queue\">View all queue</a></div>
   <div class=\"timeline\">
     <div class=\"line-sub\" style=\"margin:4px 0 8px\" data-i18n=\"next_queued\">Next 2 queued</div>
     <ul>
@@ -1046,21 +1239,25 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
         <small id=\"workerStateText\" class=\"state-pill\" data-i18n=\"worker_state_on\">Start</small>
       </div>
       <span class=\"queue-meta\">Queue: {len(queue)} items</span>
+      <button class=\"btn secondary\" onclick=\"forceNext()\" {'disabled' if len(queue) == 0 else ''}>Force Next</button>
       <button class=\"btn secondary\" onclick=\"clearQueue()\" {'disabled' if len(queue) == 0 else ''}>Clear all</button>
     </div>
   </div>
 </div>
+<div class=\"dashboard-grid\">
+<div class=\"panel\"><h3 style=\"margin-top:0\">Recent Events</h3><p class=\"sub\">Wat Driparr recent heeft gedaan.</p><div class=\"feed-list\"><ul>{event_rows}</ul></div></div>
 <div class=\"panel\"><h3 style=\"margin-top:0\" data-i18n=\"already_library\">Already in Library</h3><p class=\"sub\" data-i18n=\"already_library_sub\">Automatisch overgeslagen om duplicaten te voorkomen.</p><div class=\"feed-list\"><ul>{skipped_rows}</ul></div></div>
+</div>
 </section>
-<section id=\"lists\" class=\"tab\"><h1>Lists</h1><p class=\"sub\">Importeer een IMDb CSV-bestand.</p><div class=\"panel\"><div class=\"grid\"><div><label>Naam *</label><input id=\"listName\" placeholder=\"Mijn lijst\" required><div id=\"listNameError\" class=\"field-error\"></div></div><div><label>Media</label><select id=\"listMedia\"><option value=\"movie\">Movies</option><option value=\"series\">Series</option></select></div></div><h3 style=\"margin-top:12px\">IMDb CSV Import</h3><p class=\"sub\">Upload je IMDb export CSV of plak de inhoud hieronder.</p><div class=\"actions\"><input id=\"imdbCsvFile\" type=\"file\" accept=\".csv,text/csv\" onchange=\"importImdbCsvFile(this)\"><button class=\"btn secondary\" onclick=\"importImdbCsv()\">Import geplakte CSV</button></div><textarea id=\"imdbCsvText\" style=\"width:100%;min-height:150px;background:#120b26;color:#f1ecff;border:1px solid #4d3a86;border-radius:9px;padding:10px;margin-top:10px\" placeholder=\"Plak hier IMDb CSV inhoud...\"></textarea></div><div class=\"panel\"><h3 style=\"margin-top:0\">Saved lists</h3><div class=\"queue-wrap\"><table><thead><tr><th>#</th><th>Name</th><th>Type</th><th>Media</th><th>Source</th><th>Action</th></tr></thead><tbody>{list_rows}</tbody></table></div></div></section>
+<section id=\"lists\" class=\"tab\"><h1>Lists</h1><p class=\"sub\">Importeer een IMDb CSV-bestand.</p><div class=\"panel\"><div class=\"grid\"><div><label>Naam *</label><input id=\"listName\" placeholder=\"Mijn lijst\" required><div id=\"listNameError\" class=\"field-error\"></div></div><div><label>Media</label><select id=\"listMedia\"><option value=\"movie\">Movies</option><option value=\"series\">Series</option></select></div></div><h3 style=\"margin-top:12px\">IMDb CSV Import</h3><p class=\"sub\">Kies je IMDb export CSV en upload direct.</p><div class=\"actions\" style=\"align-items:center;gap:10px\"><input id=\"imdbCsvFile\" class=\"file-input-hidden\" type=\"file\" accept=\".csv,text/csv\" onchange=\"onImdbCsvSelected(this)\"><div class=\"file-picker\"><label for=\"imdbCsvFile\" class=\"file-trigger\">Choose file</label><div id=\"imdbCsvFileMeta\" class=\"file-chip\">Geen bestand gekozen</div></div><button id=\"imdbCsvUploadBtn\" class=\"btn secondary\" onclick=\"importImdbCsvFile()\">Upload CSV</button></div><div id=\"imdbCsvProgressWrap\" style=\"display:none;margin-top:10px\"><div style=\"height:10px;background:#2c2449;border:1px solid #4d3a86;border-radius:999px;overflow:hidden\"><div id=\"imdbCsvProgressBar\" style=\"height:100%;width:0%;background:linear-gradient(90deg,#8f62ff,#6635e8)\"></div></div><div id=\"imdbCsvProgressText\" class=\"sub\" style=\"margin-top:6px\">0%</div></div></div><div class=\"panel\"><h3 style=\"margin-top:0\">Saved lists</h3><div class=\"queue-wrap\"><table><thead><tr><th>#</th><th>Name</th><th>Type</th><th>Media</th><th>Source</th><th>Status</th><th>Action</th></tr></thead><tbody>{list_rows}</tbody></table></div></div><div class=\"panel\"><h3 style=\"margin-top:0\">Run history</h3><div class=\"queue-wrap\"><table><thead><tr><th>Time</th><th>List</th><th>Progress</th><th>Status</th><th>A/S/F</th></tr></thead><tbody>{run_history_rows}</tbody></table></div></div></section>
 <section id=\"queue\" class=\"tab\"><h1>Queue</h1><p class=\"sub\">Alle items en status.</p><div class=\"panel\"><div class=\"queue-wrap\"><table><thead><tr><th>Type</th><th>Title</th><th>ID</th><th>Status</th><th>Source</th><th>Reason</th></tr></thead><tbody>{queue_rows}</tbody></table></div></div></section>
 <section id=\"radarr\" class=\"tab\"><h1>Radarr <span>Settings</span></h1><p class=\"sub\">Manage your Radarr instances</p><div class=\"panel\"><div class=\"instance-title\" style=\"margin-bottom:12px\">Instances</div><div class=\"instance-card\"><div><b>Radarr</b> <span class=\"{'enabled-pill' if config['radarr'].get('enabled') else 'disabled-pill'}\">{'Enabled' if config['radarr'].get('enabled') else 'Disabled'}</span> <span style=\"color:#9f92c9;margin-left:10px\">{html.escape(config['radarr'].get('url',''))}</span></div><div class=\"instance-actions\"><button class=\"btn\" onclick=\"openModal('radarrModal')\">Add / Edit Instance</button><button class=\"btn secondary\" onclick=\"testService('radarr')\">Test</button></div></div></div></section>
 <section id=\"sonarr\" class=\"tab\"><h1>Sonarr <span>Settings</span></h1><p class=\"sub\">Manage your Sonarr instances</p><div class=\"panel\"><div class=\"instance-title\" style=\"margin-bottom:12px\">Instances</div><div class=\"instance-card\"><div><b>Sonarr</b> <span class=\"{'enabled-pill' if config['sonarr'].get('enabled') else 'disabled-pill'}\">{'Enabled' if config['sonarr'].get('enabled') else 'Disabled'}</span> <span style=\"color:#9f92c9;margin-left:10px\">{html.escape(config['sonarr'].get('url',''))}</span></div><div class=\"instance-actions\"><button class=\"btn\" onclick=\"openModal('sonarrModal')\">Add / Edit Instance</button><button class=\"btn secondary\" onclick=\"testService('sonarr')\">Test</button></div></div></div></section>
-<section id=\"general\" class=\"tab\"><h1 data-i18n=\"general\">General</h1><div class=\"panel\"><div class=\"grid\"><div><label data-i18n=\"drip_mode\">Drip mode</label><select id=\"dripMode\"><option value=\"timed\" data-i18n=\"drip_mode_timed\">Timed (op interval)</option><option value=\"sync\" data-i18n=\"drip_mode_sync\">Sync (wacht op completion)</option></select></div><div><label id=\"intervalPresetLabel\" data-i18n=\"drip_interval\">Drip interval</label><select id=\"intervalPreset\" onchange=\"setIntervalFromPreset()\"><option value=\"15\" data-i18n=\"every_15\">Elke 15 minuten</option><option value=\"30\" data-i18n=\"every_30\">Elke 30 minuten</option><option value=\"60\" data-i18n=\"every_60\">Elk uur</option><option value=\"90\" data-i18n=\"every_90\">Elke 1,5 uur</option><option value=\"custom\" data-i18n=\"custom\">Custom</option></select></div><div><label id=\"intervalMinutesLabel\" data-i18n=\"interval_custom\">Interval minuten (custom)</label><input id=\"intervalMinutes\" type=\"number\" value=\"{config['app'].get('intervalMinutes')}\"></div><div><label data-i18n=\"max_items\">Max items per run</label><input id=\"maxItemsPerRun\" type=\"number\" value=\"{config['app'].get('maxItemsPerRun')}\"></div><div><label data-i18n=\"tmdb_import\">TMDb import actief</label><label class=\"switch\"><input id=\"tmdbImporterEnabled\" class=\"switch-input\" type=\"checkbox\" {'checked' if config['app'].get('tmdbImporterEnabled', True) else ''}><span class=\"switch-slider\"></span></label></div><div><label data-i18n=\"imdb_import\">IMDb import actief</label><label class=\"switch\"><input id=\"imdbImporterEnabled\" class=\"switch-input\" type=\"checkbox\" {'checked' if config['app'].get('imdbImporterEnabled', False) else ''}><span class=\"switch-slider\"></span></label></div><div><label data-i18n=\"language\">Language</label><select id=\"languagePref\"><option value=\"auto\" data-i18n=\"language_auto\">Auto (system)</option><option value=\"en\">English</option><option value=\"nl\">Nederlands</option><option value=\"de\">Deutsch</option></select></div></div><div class=\"actions\"><button class=\"btn\" onclick=\"saveGeneral()\" data-i18n=\"save\">Save</button><button class=\"btn secondary\" onclick=\"showOnboardingAgain()\" data-i18n=\"show_checklist\">Show checklist</button></div></div></section>
+<section id=\"general\" class=\"tab\"><h1 data-i18n=\"general\">General</h1><div class=\"panel\"><div class=\"grid\"><div><label data-i18n=\"drip_mode\">Drip mode</label><select id=\"dripMode\"><option value=\"timed\" data-i18n=\"drip_mode_timed\">Timed (op interval)</option><option value=\"sync\" data-i18n=\"drip_mode_sync\">Sync (wacht op completion)</option></select></div><div><label id=\"intervalPresetLabel\" data-i18n=\"drip_interval\">Drip interval</label><select id=\"intervalPreset\" onchange=\"setIntervalFromPreset()\"><option value=\"15\" data-i18n=\"every_15\">Elke 15 minuten</option><option value=\"30\" data-i18n=\"every_30\">Elke 30 minuten</option><option value=\"60\" data-i18n=\"every_60\">Elk uur</option><option value=\"90\" data-i18n=\"every_90\">Elke 1,5 uur</option><option value=\"custom\" data-i18n=\"custom\">Custom</option></select></div><div><label id=\"intervalMinutesLabel\" data-i18n=\"interval_custom\">Interval minuten (custom)</label><input id=\"intervalMinutes\" type=\"number\" value=\"{config['app'].get('intervalMinutes')}\"></div><div><label data-i18n=\"max_items\">Max items per run</label><input id=\"maxItemsPerRun\" type=\"number\" value=\"{config['app'].get('maxItemsPerRun')}\"></div><div><label>Webhook notificaties</label><label class=\"switch\"><input id=\"notifyEnabled\" class=\"switch-input\" type=\"checkbox\" {'checked' if config['app'].get('notifyEnabled', False) else ''}><span class=\"switch-slider\"></span></label></div><div><label>Webhook URL</label><input id=\"notifyWebhookUrl\" value=\"{html.escape(config['app'].get('notifyWebhookUrl',''))}\" placeholder=\"https://example.com/webhook\"></div><div><label data-i18n=\"language\">Language</label><select id=\"languagePref\"><option value=\"auto\" data-i18n=\"language_auto\">Auto (system)</option><option value=\"en\">English</option><option value=\"nl\">Nederlands</option><option value=\"de\">Deutsch</option></select></div></div><div class=\"actions\"><button class=\"btn\" onclick=\"saveGeneral()\" data-i18n=\"save\">Save</button><button class=\"btn secondary\" onclick=\"testNotification()\">Test notificatie</button><button class=\"btn secondary\" onclick=\"showOnboardingAgain()\" data-i18n=\"show_checklist\">Show checklist</button></div></div></section>
 </main></div>
 <div id=\"radarrModal\" class=\"modal-backdrop\"><div class=\"modal-card\"><div class=\"modal-head\"><b>Add Instance</b><button class=\"modal-close\" onclick=\"closeModal('radarrModal')\">×</button></div><div class=\"modal-body\">{settings_form('radarr', config['radarr'], include_actions=False)}</div><div class=\"modal-foot\"><button class=\"btn secondary\" onclick=\"testService('radarr')\">Test</button><button class=\"btn\" onclick=\"saveService('radarr')\">Save</button></div></div></div>
 <div id=\"sonarrModal\" class=\"modal-backdrop\"><div class=\"modal-card\"><div class=\"modal-head\"><b>Add Instance</b><button class=\"modal-close\" onclick=\"closeModal('sonarrModal')\">×</button></div><div class=\"modal-body\">{settings_form('sonarr', config['sonarr'], include_actions=False)}</div><div class=\"modal-foot\"><button class=\"btn secondary\" onclick=\"testService('sonarr')\">Test</button><button class=\"btn\" onclick=\"saveService('sonarr')\">Save</button></div></div></div>
-<div id=\"onboardingModal\" class=\"modal-backdrop{' open' if show_onboarding else ''}\"><div class=\"modal-card\"><div class=\"modal-head\"><b data-i18n=\"onboarding_title\">Quick Start Checklist</b><button class=\"modal-close\" onclick=\"dismissOnboarding()\">×</button></div><div class=\"modal-body\"><p class=\"sub\" data-i18n=\"onboarding_sub\">Follow these steps once and you're ready.</p><ol class=\"onboarding-list\"><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-link\" src=\"/assets/link.svg\" alt=\"link\"><span data-i18n=\"onboarding_1\">Connect Radarr.</span></div><span class=\"onb-check {'done' if step1_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-add\" src=\"/assets/add.svg\" alt=\"add\"><span data-i18n=\"onboarding_2\">Add an IMDb/TMDb list URL or import IMDb CSV.</span></div><span class=\"onb-check {'done' if step2_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-drip\" src=\"/assets/water-drop.svg\" alt=\"drip\"><span data-i18n=\"onboarding_3\">Choose drip mode (timed or sync) and interval.</span></div><span class=\"onb-check {'done' if step3_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-toggle\" src=\"/assets/toggle.svg\" alt=\"toggle\"><span data-i18n=\"onboarding_4\">Enable worker and monitor the timeline.</span></div><span class=\"onb-check {'done' if step4_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li></ol><div class=\"onboarding-setup\"><div class=\"grid\"><div><label>Radarr URL *</label><input id=\"obRadarrUrl\" value=\"{html.escape(config.get('radarr', {}).get('url',''))}\" placeholder=\"http://radarr:7878\"></div><div><label>Radarr API key *</label><input id=\"obRadarrApi\" value=\"{html.escape(config.get('radarr', {}).get('apiKey',''))}\" placeholder=\"API key\"></div></div></div><p class=\"slogan\" data-i18n=\"set_and_forget\">Set and forget.</p></div><div class=\"modal-foot\"><span></span><button class=\"btn onboarding-save\" onclick=\"saveOnboardingSetup()\">Opslaan</button></div></div></div>
+<div id=\"onboardingModal\" class=\"modal-backdrop{' open' if show_onboarding else ''}\"><div class=\"modal-card\"><div class=\"modal-head\"><b data-i18n=\"onboarding_title\">Quick Start Checklist</b><button class=\"modal-close\" onclick=\"dismissOnboarding()\">×</button></div><div class=\"modal-body\"><p class=\"sub\" data-i18n=\"onboarding_sub\">Follow these steps once and you're ready.</p><ol class=\"onboarding-list\"><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-link\" src=\"/assets/link.svg\" alt=\"link\"><span data-i18n=\"onboarding_1\">Connect Radarr.</span></div><span class=\"onb-check {'done' if step1_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-add\" src=\"/assets/add.svg\" alt=\"add\"><span data-i18n=\"onboarding_2\">Import an IMDb CSV list.</span></div><span class=\"onb-check {'done' if step2_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-drip\" src=\"/assets/water-drop.svg\" alt=\"drip\"><span data-i18n=\"onboarding_3\">Choose drip mode (timed or sync) and interval.</span></div><span class=\"onb-check {'done' if step3_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-toggle\" src=\"/assets/toggle.svg\" alt=\"toggle\"><span data-i18n=\"onboarding_4\">Enable worker and monitor the timeline.</span></div><span class=\"onb-check {'done' if step4_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li></ol><div class=\"onboarding-setup\"><div class=\"grid\"><div><label>Radarr URL *</label><input id=\"obRadarrUrl\" value=\"{html.escape(config.get('radarr', {}).get('url',''))}\" placeholder=\"http://radarr:7878\"></div><div><label>Radarr API key *</label><input id=\"obRadarrApi\" value=\"{html.escape(config.get('radarr', {}).get('apiKey',''))}\" placeholder=\"API key\"></div></div></div><p class=\"slogan\" data-i18n=\"set_and_forget\">Set and forget.</p></div><div class=\"modal-foot\"><span></span><button class=\"btn onboarding-save\" onclick=\"saveOnboardingSetup()\">Opslaan</button></div></div></div>
 <div id=\"toast\" class=\"toast\"></div>
 <script>
 function openTab(tabId) {{ document.querySelectorAll('nav button').forEach(b => b.classList.remove('active')); document.querySelectorAll('.tab').forEach(t => t.classList.remove('active')); const btn = document.querySelector(`nav button[data-tab="${{tabId}}"]`); if (btn) btn.classList.add('active'); const tab = document.getElementById(tabId); if (tab) tab.classList.add('active'); }}
@@ -1083,11 +1280,11 @@ function applyI18n() {{
       last_completed:'Last 2 completed drips', worker_state_label:'Start/Pause', worker_state_on:'Start', worker_state_off:'Pause', already_library:'Already in Library',
       already_library_sub:'Automatically skipped to prevent duplicates.', onboarding_title:'Quick Start Checklist',
       onboarding_sub:'Follow these steps once and you are ready.', onboarding_1:'Connect Radarr.',
-      onboarding_2:'Add an IMDb/TMDb list URL or import IMDb CSV.', onboarding_3:'Choose drip mode (timed or sync) and interval.',
+      onboarding_2:'Import an IMDb CSV list.', onboarding_3:'Choose drip mode (timed or sync) and interval.',
       onboarding_4:'Enable worker and monitor the timeline.', set_and_forget:'Set and forget.', got_it:'Got it',
       general:'General', drip_mode:'Drip mode', drip_mode_timed:'Timed (interval based)', drip_mode_sync:'Sync (wait for completion)',
       drip_interval:'Drip interval', every_15:'Every 15 minutes', every_30:'Every 30 minutes', every_60:'Every hour', every_90:'Every 90 minutes',
-      custom:'Custom', interval_custom:'Interval minutes (custom)', max_items:'Max items per run', tmdb_import:'TMDb import enabled',
+      custom:'Custom', interval_custom:'Interval minutes (custom)', max_items:'Max items per run',
       imdb_import:'IMDb import enabled', language:'Language', language_auto:'Auto (system)', save:'Save', show_checklist:'Show checklist'
     }},
     nl: {{
@@ -1096,12 +1293,12 @@ function applyI18n() {{
       current_drip:'Huidige drip naar Radarr/Sonarr', last_completed:'Laatste 2 afgeronde drips',
       worker_state_label:'Start/Pauze', worker_state_on:'Start', worker_state_off:'Pauze', already_library:'Al in Bibliotheek', already_library_sub:'Automatisch overgeslagen om duplicaten te voorkomen.',
       onboarding_title:'Snelle Start Checklist', onboarding_sub:'Doorloop dit eenmalig en je bent klaar.',
-      onboarding_1:'Koppel Radarr.', onboarding_2:'Voeg een IMDb/TMDb lijst-URL toe of importeer IMDb CSV.',
+      onboarding_1:'Koppel Radarr.', onboarding_2:'Importeer een IMDb CSV-lijst.',
       onboarding_3:'Kies dripmodus (timed of sync) en interval.', onboarding_4:'Zet de worker aan en volg de timeline.',
       set_and_forget:'Set and forget.', got_it:'Begrepen', general:'Algemeen', drip_mode:'Drip modus',
       drip_mode_timed:'Timed (op interval)', drip_mode_sync:'Sync (wacht op afronding)', drip_interval:'Drip interval',
       every_15:'Elke 15 minuten', every_30:'Elke 30 minuten', every_60:'Elk uur', every_90:'Elke 1,5 uur', custom:'Aangepast',
-      interval_custom:'Interval minuten (aangepast)', max_items:'Max items per run', tmdb_import:'TMDb import actief',
+      interval_custom:'Interval minuten (aangepast)', max_items:'Max items per run',
       imdb_import:'IMDb import actief', language:'Taal', language_auto:'Auto (systeem)', save:'Opslaan', show_checklist:'Toon checklist'
     }},
     de: {{
@@ -1110,12 +1307,12 @@ function applyI18n() {{
       current_drip:'Aktueller Drip zu Radarr/Sonarr', last_completed:'Letzte 2 abgeschlossene Drips',
       worker_state_label:'Start/Pause', worker_state_on:'Start', worker_state_off:'Pause', already_library:'Bereits in Bibliothek', already_library_sub:'Automatisch übersprungen, um Duplikate zu vermeiden.',
       onboarding_title:'Quick-Start Checkliste', onboarding_sub:'Einmal durchgehen, dann bist du bereit.',
-      onboarding_1:'Radarr verbinden.', onboarding_2:'IMDb/TMDb-Listen-URL hinzufügen oder IMDb-CSV importieren.',
+      onboarding_1:'Radarr verbinden.', onboarding_2:'Eine IMDb-CSV-Liste importieren.',
       onboarding_3:'Drip-Modus (zeitgesteuert oder sync) und Intervall wählen.', onboarding_4:'Worker aktivieren und Timeline beobachten.',
       set_and_forget:'Set and forget.', got_it:'Verstanden', general:'Allgemein', drip_mode:'Drip-Modus',
       drip_mode_timed:'Zeitgesteuert (Intervall)', drip_mode_sync:'Sync (auf Abschluss warten)', drip_interval:'Drip-Intervall',
       every_15:'Alle 15 Minuten', every_30:'Alle 30 Minuten', every_60:'Jede Stunde', every_90:'Alle 90 Minuten', custom:'Benutzerdefiniert',
-      interval_custom:'Intervall Minuten (benutzerdefiniert)', max_items:'Max. Elemente pro Lauf', tmdb_import:'TMDb-Import aktiv',
+      interval_custom:'Intervall Minuten (benutzerdefiniert)', max_items:'Max. Elemente pro Lauf',
       imdb_import:'IMDb-Import aktiv', language:'Sprache', language_auto:'Auto (System)', save:'Speichern', show_checklist:'Checkliste anzeigen'
     }}
   }};
@@ -1146,49 +1343,45 @@ function applyI18n() {{
   const h = (id, txt) => {{ const el=document.querySelector(`#${{id}} h1`); if (el) el.textContent = txt; }};
   h('lists', tn.lists); h('queue', tn.queue); h('radarr', tn.radarr); h('sonarr', tn.sonarr);
   const subt = {{
-    en: {{lists:'Add a list URL or import an IMDb CSV.', queue:'All items and status.', radarr:'Manage your Radarr instances', sonarr:'Manage your Sonarr instances'}},
-    nl: {{lists:'Voeg een lijst-URL toe of importeer een IMDb CSV.', queue:'Alle items en status.', radarr:'Beheer je Radarr-instanties', sonarr:'Beheer je Sonarr-instanties'}},
-    de: {{lists:'Füge eine Listen-URL hinzu oder importiere eine IMDb-CSV.', queue:'Alle Elemente und Status.', radarr:'Verwalte deine Radarr-Instanzen', sonarr:'Verwalte deine Sonarr-Instanzen'}}
+    en: {{lists:'Import an IMDb CSV.', queue:'All items and status.', radarr:'Manage your Radarr instances', sonarr:'Manage your Sonarr instances'}},
+    nl: {{lists:'Importeer een IMDb CSV.', queue:'Alle items en status.', radarr:'Beheer je Radarr-instanties', sonarr:'Beheer je Sonarr-instanties'}},
+    de: {{lists:'Importiere eine IMDb-CSV.', queue:'Alle Elemente und Status.', radarr:'Verwalte deine Radarr-Instanzen', sonarr:'Verwalte deine Sonarr-Instanzen'}}
   }};
   const st = subt[lang] || subt.en;
   const setSub = (id, text) => {{ const el=document.querySelector(`#${{id}} .sub`); if (el) el.textContent = text; }};
   setSub('lists', st.lists); setSub('queue', st.queue); setSub('radarr', st.radarr); setSub('sonarr', st.sonarr);
   const labels = {{
     en: {{
-      name:'Name', type:'Type', media:'Media', url:'URL', import_url:'Import URL', imdb_csv:'IMDb CSV Import',
-      imdb_csv_sub:'Upload your IMDb export CSV or paste contents below.', import_pasted:'Import pasted CSV',
+      name:'Name', type:'Type', media:'Media', imdb_csv:'IMDb CSV Import',
+      imdb_csv_sub:'Choose your IMDb export CSV and upload directly.', import_pasted:'Upload CSV',
       queue_type:'Type', queue_title:'Title', queue_id:'ID', queue_status:'Status', queue_source:'Source', queue_reason:'Reason',
       add_edit_instance:'Add / Edit Instance', test:'Test', save:'Save', instances:'Instances', enabled:'Enabled', disabled:'Disabled',
       current:'Current', queued:'Queued', completed:'Completed'
     }},
     nl: {{
-      name:'Naam', type:'Type', media:'Media', url:'URL', import_url:'Importeer URL', imdb_csv:'IMDb CSV Import',
-      imdb_csv_sub:'Upload je IMDb export CSV of plak de inhoud hieronder.', import_pasted:'Importeer geplakte CSV',
+      name:'Naam', type:'Type', media:'Media', imdb_csv:'IMDb CSV Import',
+      imdb_csv_sub:'Kies je IMDb export CSV en upload direct.', import_pasted:'Upload CSV',
       queue_type:'Type', queue_title:'Titel', queue_id:'ID', queue_status:'Status', queue_source:'Bron', queue_reason:'Reden',
       add_edit_instance:'Toevoegen / Wijzigen', test:'Test', save:'Opslaan', instances:'Instanties', enabled:'Ingeschakeld', disabled:'Uitgeschakeld',
       current:'Huidig', queued:'Queued', completed:'Voltooid'
     }},
     de: {{
-      name:'Name', type:'Typ', media:'Medien', url:'URL', import_url:'URL importieren', imdb_csv:'IMDb CSV Import',
-      imdb_csv_sub:'Lade deine IMDb-Export-CSV hoch oder füge den Inhalt unten ein.', import_pasted:'Eingefügte CSV importieren',
+      name:'Name', type:'Typ', media:'Medien', imdb_csv:'IMDb CSV Import',
+      imdb_csv_sub:'Wahle deine IMDb-Export-CSV und lade sie direkt hoch.', import_pasted:'CSV hochladen',
       queue_type:'Typ', queue_title:'Titel', queue_id:'ID', queue_status:'Status', queue_source:'Quelle', queue_reason:'Grund',
       add_edit_instance:'Hinzufügen / Bearbeiten', test:'Test', save:'Speichern', instances:'Instanzen', enabled:'Aktiviert', disabled:'Deaktiviert',
       current:'Aktuell', queued:'Wartend', completed:'Abgeschlossen'
     }}
   }};
   const l = labels[lang] || labels.en;
-  const listLabels = document.querySelectorAll('#lists label');
+  const listLabels = document.querySelectorAll('#lists .panel .grid label');
   if (listLabels[0]) listLabels[0].textContent = l.name;
-  if (listLabels[1]) listLabels[1].textContent = l.type;
-  if (listLabels[2]) listLabels[2].textContent = l.media;
-  if (listLabels[3]) listLabels[3].textContent = l.url;
-  const listBtn = document.querySelector('#lists .actions .btn');
-  if (listBtn) listBtn.textContent = l.import_url;
-  const csvHead = document.querySelector('#lists h3');
+  if (listLabels[1]) listLabels[1].textContent = l.media;
+  const csvHead = document.querySelector('#lists .panel h3');
   if (csvHead) csvHead.textContent = l.imdb_csv;
-  const csvSub = document.querySelectorAll('#lists .sub')[1];
+  const csvSub = document.querySelector('#lists .panel p.sub');
   if (csvSub) csvSub.textContent = l.imdb_csv_sub;
-  const csvBtn = document.querySelector('#lists .actions .btn.secondary');
+  const csvBtn = document.querySelector('#imdbCsvUploadBtn');
   if (csvBtn) csvBtn.textContent = l.import_pasted;
   const th = document.querySelectorAll('#queue th');
   if (th[0]) th[0].textContent = l.queue_type;
@@ -1276,7 +1469,8 @@ function validateService(name) {{
 }}
 function saveService(name) {{ if (!validateService(name)) return; post('/api/service/'+name, serviceData(name)); }}
 function testService(name) {{ if (!validateService(name)) return; post('/api/service/'+name+'/test', serviceData(name)); }}
-function saveGeneral(toggle) {{ post('/api/general', {{dripMode:dripMode.value, intervalMinutes:Number(intervalMinutes.value), maxItemsPerRun:Number(maxItemsPerRun.value), tmdbImporterEnabled:tmdbImporterEnabled.checked, imdbImporterEnabled:imdbImporterEnabled.checked, toggleWorker:!!toggle, workerEnabled:(document.getElementById('workerEnabled') ? document.getElementById('workerEnabled').checked : undefined)}}); }}
+function saveGeneral(toggle) {{ post('/api/general', {{dripMode:dripMode.value, intervalMinutes:Number(intervalMinutes.value), maxItemsPerRun:Number(maxItemsPerRun.value), notifyEnabled:(document.getElementById('notifyEnabled') ? document.getElementById('notifyEnabled').checked : false), notifyWebhookUrl:(document.getElementById('notifyWebhookUrl') ? document.getElementById('notifyWebhookUrl').value : ''), toggleWorker:!!toggle, workerEnabled:(document.getElementById('workerEnabled') ? document.getElementById('workerEnabled').checked : undefined)}}); }}
+function testNotification() {{ post('/api/notify-test', {{}}); }}
 function setIntervalFromPreset() {{ if (intervalPreset.value !== 'custom') intervalMinutes.value = Number(intervalPreset.value); }}
 function updateDripModeUI() {{
   const isSync = dripMode.value === 'sync';
@@ -1301,20 +1495,83 @@ function validateListName() {{
   }}
   return true;
 }}
-function importImdbCsv() {{
-  if (!validateListName()) return;
-  post('/api/import-csv', {{name:listName.value.trim(), mediaType:listMedia.value || 'movie', csvText:imdbCsvText.value}});
+function setCsvProgress(percent, text) {{
+  const wrap = document.getElementById('imdbCsvProgressWrap');
+  const bar = document.getElementById('imdbCsvProgressBar');
+  const label = document.getElementById('imdbCsvProgressText');
+  if (!wrap || !bar || !label) return;
+  const safe = Math.max(0, Math.min(100, Math.round(percent)));
+  wrap.style.display = 'block';
+  bar.style.width = `${{safe}}%`;
+  label.textContent = text || `${{safe}}%`;
 }}
-function importImdbCsvFile(input) {{
-  const file = input.files && input.files[0];
-  if (!file) return;
+function onImdbCsvSelected(input) {{
+  const file = input?.files && input.files[0];
+  const meta = document.getElementById('imdbCsvFileMeta');
+  if (!file) {{
+    if (meta) {{
+      meta.textContent = 'Geen bestand gekozen';
+      meta.classList.remove('has-file');
+    }}
+    return;
+  }}
+  if (!listName.value) listName.value = (file.name || 'IMDb CSV').replace(/\\.csv$/i, '');
+  if (meta) {{
+    meta.textContent = `${{file.name}} (${{(file.size / 1024).toFixed(1)}} KB)`;
+    meta.classList.add('has-file');
+  }}
+  setCsvProgress(0, 'Klaar om te uploaden');
+}}
+function importImdbCsvFile() {{
+  if (!validateListName()) return;
+  const fileInput = document.getElementById('imdbCsvFile');
+  const file = fileInput?.files && fileInput.files[0];
+  if (!file) {{ toast('Kies eerst een CSV bestand.'); return; }}
+  if (file.size > 2 * 1024 * 1024) {{ toast('CSV bestand is te groot (max 2 MB).'); return; }}
+  const uploadBtn = document.getElementById('imdbCsvUploadBtn');
+  if (uploadBtn) uploadBtn.disabled = true;
   const reader = new FileReader();
-  reader.onload = () => {{
-    imdbCsvText.value = String(reader.result || '');
-    if (!listName.value) listName.value = file.name || 'IMDb CSV';
-    toast('CSV geladen. Klik op "Import geplakte CSV" om te starten.');
+  reader.onprogress = (ev) => {{
+    if (!ev.lengthComputable) return;
+    setCsvProgress((ev.loaded / ev.total) * 45, 'Bestand lezen...');
   }};
-  reader.onerror = () => toast('CSV kon niet gelezen worden');
+  reader.onerror = () => {{
+    if (uploadBtn) uploadBtn.disabled = false;
+    toast('CSV kon niet gelezen worden');
+  }};
+  reader.onload = () => {{
+    const payload = JSON.stringify({{
+      name: listName.value.trim(),
+      mediaType: listMedia.value || 'movie',
+      csvText: String(reader.result || '')
+    }});
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/import-csv');
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.upload.onprogress = (ev) => {{
+      if (!ev.lengthComputable) return;
+      const p = 45 + (ev.loaded / ev.total) * 50;
+      setCsvProgress(p, 'Uploaden...');
+    }};
+    xhr.onload = () => {{
+      if (uploadBtn) uploadBtn.disabled = false;
+      if (xhr.status === 401) {{ location.href = '/login'; return; }}
+      try {{
+        const j = JSON.parse(xhr.responseText || '{{}}');
+        setCsvProgress(100, 'Klaar');
+        toast(j.message || (j.ok ? 'Import voltooid' : 'Fout bij import'));
+        if (j.reload) setTimeout(() => location.reload(), 650);
+      }} catch (_err) {{
+        toast('Onverwacht antwoord van server');
+      }}
+    }};
+    xhr.onerror = () => {{
+      if (uploadBtn) uploadBtn.disabled = false;
+      toast('Upload mislukt');
+    }};
+    setCsvProgress(50, 'Uploaden...');
+    xhr.send(payload);
+  }};
   reader.readAsText(file);
 }}
 function deleteList(index) {{
@@ -1326,6 +1583,7 @@ function clearQueue() {{
   post('/api/queue/clear', {{}});
 }}
 function runNow() {{ post('/api/run-now', {{}}); }}
+function forceNext() {{ post('/api/force-next', {{}}); }}
 function dismissOnboarding() {{
   const modal = document.getElementById('onboardingModal');
   if (modal) modal.classList.remove('open');
@@ -1355,16 +1613,6 @@ if (languagePref) {{
 }}
 async function logout() {{ await post('/api/logout', {{}}); location.href='/login'; }}
 applyI18n();
-function enforceSingleSource(from) {{
-  if (from === 'tmdb' && tmdbImporterEnabled.checked) imdbImporterEnabled.checked = false;
-  if (from === 'imdb' && imdbImporterEnabled.checked) tmdbImporterEnabled.checked = false;
-  if (!tmdbImporterEnabled.checked && !imdbImporterEnabled.checked) tmdbImporterEnabled.checked = true;
-}}
-if (typeof tmdbImporterEnabled !== 'undefined' && typeof imdbImporterEnabled !== 'undefined') {{
-  tmdbImporterEnabled.addEventListener('change', () => enforceSingleSource('tmdb'));
-  imdbImporterEnabled.addEventListener('change', () => enforceSingleSource('imdb'));
-  enforceSingleSource('tmdb');
-}}
 (() => {{
   const next = localStorage.getItem('driparr_next_step');
   if (next === 'lists') {{
@@ -1395,10 +1643,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def read_json(self):
         length = int(self.headers.get("Content-Length", "0"))
-        return json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+        if length < 0 or length > MAX_REQUEST_BYTES:
+            raise RuntimeError("Request te groot.")
+        raw = self.rfile.read(length).decode("utf-8")
+        try:
+            return json.loads(raw or "{}")
+        except json.JSONDecodeError:
+            raise RuntimeError("Ongeldige JSON payload.")
 
     def read_form(self):
         length = int(self.headers.get("Content-Length", "0"))
+        if length < 0 or length > MAX_REQUEST_BYTES:
+            raise RuntimeError("Request te groot.")
         raw = self.rfile.read(length).decode("utf-8")
         parsed = parse_qs(raw, keep_blank_values=True)
         return {key: values[0] if values else "" for key, values in parsed.items()}
@@ -1515,14 +1771,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not root_path:
                     raise RuntimeError("Root folder is vereist. Kies een geldige map uit Radarr.")
                 config["radarr"]["rootFolderPath"] = root_path
-                tmdb_enabled = form.get("tmdbImporterEnabled", "").strip().lower() in ("true", "on", "1", "yes")
-                imdb_enabled = form.get("imdbImporterEnabled", "").strip().lower() in ("true", "on", "1", "yes")
-                if tmdb_enabled and imdb_enabled:
-                    imdb_enabled = False
-                if not tmdb_enabled and not imdb_enabled:
-                    tmdb_enabled = True
-                config["app"]["tmdbImporterEnabled"] = tmdb_enabled
-                config["app"]["imdbImporterEnabled"] = imdb_enabled
+                config["app"]["tmdbImporterEnabled"] = False
+                config["app"]["imdbImporterEnabled"] = True
                 config["app"]["setupComplete"] = True
                 config["app"]["onboardingDismissed"] = False
                 save_config(config)
@@ -1570,20 +1820,29 @@ class Handler(BaseHTTPRequestHandler):
                     config["app"]["dripMode"] = "sync"
                 config["app"]["intervalMinutes"] = safe_int(data.get("intervalMinutes"), config["app"].get("intervalMinutes", 60), minimum=1, maximum=24 * 60)
                 config["app"]["maxItemsPerRun"] = safe_int(data.get("maxItemsPerRun"), config["app"].get("maxItemsPerRun", 1), minimum=1, maximum=50)
-                tmdb_enabled = bool(data.get("tmdbImporterEnabled", True))
-                imdb_enabled = bool(data.get("imdbImporterEnabled", False))
-                if tmdb_enabled and imdb_enabled:
-                    imdb_enabled = False
-                if not tmdb_enabled and not imdb_enabled:
-                    tmdb_enabled = True
-                config["app"]["tmdbImporterEnabled"] = tmdb_enabled
-                config["app"]["imdbImporterEnabled"] = imdb_enabled
+                config["app"]["notifyEnabled"] = bool(data.get("notifyEnabled", False))
+                webhook_url = str(data.get("notifyWebhookUrl", "")).strip()
+                if webhook_url:
+                    parsed = urlparse(webhook_url)
+                    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                        raise RuntimeError("Webhook URL moet een geldige http(s) URL zijn.")
+                config["app"]["notifyWebhookUrl"] = webhook_url
+                config["app"]["tmdbImporterEnabled"] = False
+                config["app"]["imdbImporterEnabled"] = True
                 if "workerEnabled" in data and data.get("workerEnabled") is not None:
                     config["app"]["workerEnabled"] = bool(data.get("workerEnabled"))
                 elif data.get("toggleWorker"):
                     config["app"]["workerEnabled"] = not config["app"].get("workerEnabled")
                 save_config(config)
                 self.respond(200, json.dumps({"ok": True, "message": "Instellingen opgeslagen.", "reload": True}), "application/json")
+                return
+
+            if path == "/api/notify-test":
+                try:
+                    send_webhook_notification(config, "test", "Driparr test", "Webhook notificaties werken.")
+                    self.respond(200, json.dumps({"ok": True, "message": "Test notificatie verstuurd."}), "application/json")
+                except Exception as error:
+                    self.respond(200, json.dumps({"ok": False, "message": f"Test notificatie mislukt: {error}"}), "application/json")
                 return
 
             if path == "/api/lists":
@@ -1614,6 +1873,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise RuntimeError("Lijstnaam is verplicht.")
                 if not csv_text.strip():
                     raise RuntimeError("CSV tekst is leeg.")
+                if len(csv_text) > MAX_CSV_CHARS:
+                    raise RuntimeError("CSV bestand is te groot (max 2 MB).")
                 entries = imdb_entries_from_csv_text(csv_text, media_type=media_type)
                 if not entries:
                     raise RuntimeError("Geen IMDb IDs gevonden in CSV.")
@@ -1627,6 +1888,21 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 save_config(config)
                 added = enqueue_ids(config, media_type, "imdb", entries, list_name)
+                push_run_history(
+                    config,
+                    {
+                        "at": utc_now(),
+                        "listName": list_name,
+                        "status": "queued",
+                        "done": 0,
+                        "total": int(added),
+                        "added": 0,
+                        "skipped": 0,
+                        "failed": 0,
+                    },
+                )
+                refresh_run_history(config, read_queue())
+                save_config(config)
                 worker_enabled = bool(config.get("app", {}).get("workerEnabled"))
                 if worker_enabled:
                     with LOCK:
@@ -1634,6 +1910,11 @@ class Handler(BaseHTTPRequestHandler):
                     message = f"{added} items uit CSV geimporteerd. Eerste drip is gestart."
                 else:
                     message = f"{added} items uit CSV geimporteerd. Worker staat op pauze, er is nog niets gedript."
+                push_event("info", f"CSV imported: {list_name}", f"{added} items queued")
+                try:
+                    send_webhook_notification(config, "list_imported", f"Lijst geimporteerd: {list_name}", f"{added} items queued", {"listName": list_name, "queued": added})
+                except Exception:
+                    pass
                 self.respond(200, json.dumps({"ok": True, "message": message, "reload": True}), "application/json")
                 return
 
@@ -1643,12 +1924,23 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 with LOCK:
                     process_once()
+                push_event("info", "Manual run", LAST_RUN["message"])
+                self.respond(200, json.dumps({"ok": True, "message": LAST_RUN["message"], "reload": True}), "application/json")
+                return
+
+            if path == "/api/force-next":
+                with LOCK:
+                    process_once(force=True)
+                push_event("info", "Force next", LAST_RUN["message"])
                 self.respond(200, json.dumps({"ok": True, "message": LAST_RUN["message"], "reload": True}), "application/json")
                 return
 
             if path == "/api/queue/clear":
                 write_queue([])
+                refresh_run_history(config, [])
+                save_config(config)
                 LAST_RUN.update({"at": utc_now(), "message": "Queue handmatig leeggemaakt."})
+                push_event("info", "Queue cleared", "All queued items removed by user")
                 self.respond(200, json.dumps({"ok": True, "message": "Queue is volledig leeggemaakt.", "reload": True}), "application/json")
                 return
 
@@ -1686,7 +1978,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/logout":
-                self.respond(200, json.dumps({"ok": True, "message": "Uitgelogd."}), "application/json", set_cookie="driparr_session=; Path=/; Max-Age=0")
+                self.respond(200, json.dumps({"ok": True, "message": "Uitgelogd."}), "application/json", set_cookie="driparr_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
                 return
 
             self.respond(404, json.dumps({"ok": False, "message": "Niet gevonden."}), "application/json")

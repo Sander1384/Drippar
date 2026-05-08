@@ -7,10 +7,12 @@ Driparr voert films gecontroleerd (drip-feed) naar Radarr in plaats van bulk-imp
 - Loginpagina met username/password
 - Setup wizard na eerste login
 - Radarr setup via UI (URL, API key, profile, root folder)
-- IMDb en TMDb list import als apart activeerbare bronnen
-- IMDb -> TMDb resolutie via Radarr lookup
+- IMDb CSV list import (movie/series)
 - Duplicate filter: films die al in Radarr staan worden automatisch overgeslagen (`skipped`)
 - Drip-feed worker (`maxItemsPerRun` per interval)
+- Sync mode: wacht op afronding voordat volgende drip start
+- Queue voortgang en run history in UI
+- Optionele webhook notificaties
 - Docker Compose setup voor hergebruik
 
 ## Productie starten
