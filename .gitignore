@@ -3,5 +3,8 @@ config.local.json
 *.log
 __pycache__/
 backups/
+_reference/
+curl-cookies.txt
+WORK_NEXT_STEPS.md
 data/queue.csv
 data-test/queue.csv

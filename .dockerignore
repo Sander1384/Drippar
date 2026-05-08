@@ -2,5 +2,10 @@
 .gitignore
 .dockerignore
 config.local.json
+.env
 *.log
 __pycache__/
+backups/
+_reference/
+curl-cookies.txt
+data-test/
