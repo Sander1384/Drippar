@@ -63,7 +63,7 @@ def minutes_since(value):
 
 
 def future_time_text(seconds):
-    return (datetime.now(timezone.utc) + timedelta(seconds=max(0, int(seconds)))).strftime("%H:%M")
+    return (datetime.now().astimezone() + timedelta(seconds=max(0, int(seconds)))).strftime("%H:%M")
 
 
 def next_check_text(config):

@@ -1,6 +1,8 @@
-# Driparr v0.1.7
+# Driparr v0.1.9
 
 Liveblog rabbit mood UI release for Driparr.
+
+This release fixes liveblog future check times so they use the same local timezone as the visible liveblog timestamp.
 
 ## Highlights
 
@@ -25,7 +27,7 @@ Create a data folder and a `docker-compose.yml`:
 ```yaml
 services:
   driparr:
-    image: ghcr.io/sander1384/driparr:v0.1.7
+    image: ghcr.io/sander1384/driparr:v0.1.9
     container_name: driparr
     restart: unless-stopped
     ports:
