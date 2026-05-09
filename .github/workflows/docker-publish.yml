@@ -8,6 +8,7 @@ on:
 
 env:
   IMAGE_NAME: ghcr.io/sander1384/driparr
+  LEGACY_IMAGE_NAME: ghcr.io/sander1384/seerrdripfeed
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
@@ -34,7 +35,9 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE_NAME }}
+          images: |
+            ${{ env.IMAGE_NAME }}
+            ${{ env.LEGACY_IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha

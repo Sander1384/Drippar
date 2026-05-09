@@ -191,6 +191,8 @@ For automatic latest builds from `main`, use:
 image: ghcr.io/sander1384/driparr:latest
 ```
 
+Older stacks that still use `ghcr.io/sander1384/seerrdripfeed:latest` are also updated, but new installs should use the `driparr` image name.
+
 Then pull and restart:
 
 ```bash
