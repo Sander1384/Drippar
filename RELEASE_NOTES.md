@@ -1,8 +1,10 @@
-# Driparr v0.1.15
+# Driparr v0.1.16
 
 Trust and clarity release for Driparr.
 
 This release focuses on making Driparr's behavior clear enough for real user feedback. It improves Radarr status handling, live feedback, language consistency, and sync-mode behavior.
+
+This release also fixes the Docker image version environment so freshly pulled containers show the correct current version in the UI.
 
 ## Highlights
 
@@ -31,7 +33,7 @@ Create a data folder and a `docker-compose.yml`:
 ```yaml
 services:
   driparr:
-    image: ghcr.io/sander1384/driparr:v0.1.15
+    image: ghcr.io/sander1384/driparr:v0.1.16
     container_name: driparr
     restart: unless-stopped
     ports:
