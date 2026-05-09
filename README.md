@@ -281,3 +281,5 @@ docker compose up -d
 ## Credits
 
 Driparr was shaped with inspiration from the self-hosted Arr ecosystem and release-page structure from projects such as [Cleanuparr](https://github.com/Cleanuparr/Cleanuparr).
+
+It is also a hobby project built with love, fully vibe-coded in Visual Studio Code together with ChatGPT.
