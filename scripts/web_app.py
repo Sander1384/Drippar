@@ -27,6 +27,7 @@ SKIPPED_STATUSES = {"skipped", "skipped_no_indexer"}
 LOCK = threading.Lock()
 LAST_RUN = {"at": None, "message": "Worker has not started yet."}
 LAST_EVENTS = []
+LIVEBLOG = []
 SESSIONS = {}
 SESSION_TTL_SECONDS = 60 * 60 * 12
 MAX_REQUEST_BYTES = 2 * 1024 * 1024
@@ -70,6 +71,17 @@ def push_event(level, title, detail=""):
         },
     )
     del LAST_EVENTS[80:]
+
+
+def push_liveblog(message):
+    LIVEBLOG.insert(
+        0,
+        {
+            "at": utc_now(),
+            "message": str(message or ""),
+        },
+    )
+    del LIVEBLOG[80:]
 
 
 def safe_int(value, default, minimum=None, maximum=None):
@@ -924,6 +936,7 @@ def refresh_completed_items(config, rows):
     changed = False
     for row in active_queue_items(rows):
         if row.get("type") == "movie":
+            push_liveblog(f"Ik ben nu Radarr aan het controleren voor {row['title']}.")
             status = radarr_movie_status(config, row)
             state = status.get("state")
             reason = str(status.get("reason", "")).strip()
@@ -931,20 +944,24 @@ def refresh_completed_items(config, rows):
                 row["status"] = "completed"
                 row["error"] = ""
                 changed = True
+                push_liveblog(f"Radarr is klaar met {row['title']}; ik zet hem bij voltooid.")
                 push_event("completed", row["title"], reason or "Radarr reports the movie file is available")
             elif state == "skipped_no_indexer":
                 row["status"] = "skipped_no_indexer"
                 row["error"] = reason or "Radarr did not grab a release."
                 changed = True
+                push_liveblog(f"Ik kan voor {row['title']} geen bruikbare download vinden. Ik sla deze over en pak zo de volgende.")
                 push_event("skipped", row["title"], row["error"])
             elif reason:
                 row["error"] = reason
                 changed = True
+                push_liveblog(f"{row['title']} is nog bezig: {reason}")
             continue
         if item_is_completed(config, row):
             row["status"] = "completed"
             row["error"] = ""
             changed = True
+            push_liveblog(f"{row['title']} is klaar. Ik ruim mijn wachtrij bij.")
             push_event("completed", row["title"], "Radarr reports the movie file is available")
     return changed
 
@@ -1009,16 +1026,19 @@ def process_once(force=False):
     rows = read_queue()
     changed = False
     drip_mode = config["app"].get("dripMode", "sync")
+    push_liveblog("Ik word wakker en kijk wat er in mijn wachtrij staat.")
 
     try:
         if refresh_completed_items(config, rows):
             changed = True
     except RuntimeError as error:
         LAST_RUN.update({"at": utc_now(), "message": f"Sync check error: {error}"})
+        push_liveblog(f"Radarr geeft een fout terug tijdens mijn controle: {error}")
         return
 
     active_item = latest_active_item(rows)
     if drip_mode == "sync" and active_item:
+        push_liveblog(f"Ik wacht nog even met de volgende film, want {active_item['title']} is nog niet klaar volgens Radarr.")
         LAST_RUN.update(
             {
                 "at": utc_now(),
@@ -1035,6 +1055,7 @@ def process_once(force=False):
     selected = [row for row in rows if row["status"] == "todo"][:max_items]
     if not selected:
         LAST_RUN.update({"at": utc_now(), "message": "No todo items."})
+        push_liveblog("Ik heb nu geen nieuwe films klaarstaan. Ik blijf rustig wachten.")
         if changed:
             write_queue(rows)
             if refresh_run_history(config, rows):
@@ -1044,6 +1065,7 @@ def process_once(force=False):
     for item in selected:
         try:
             if item["type"] == "movie":
+                push_liveblog(f"Radarr is oké, ik ga {item['title']} klaarzetten om te downloaden.")
                 payload = radarr_payload(config, item)
                 if radarr_has_tmdb(config, payload["tmdbId"]):
                     item["status"] = "skipped"
@@ -1051,6 +1073,7 @@ def process_once(force=False):
                     item["addedAt"] = utc_now()
                     changed = True
                     LAST_RUN.update({"at": item["addedAt"], "message": f"Skipped (already present): {item['title']}"})
+                    push_liveblog(f"{item['title']} staat al in Radarr. Ik sla hem netjes over.")
                     push_event("skipped", item["title"], "Already exists in Radarr")
                     continue
                 service_request(config["radarr"], "POST", "/movie", payload)
@@ -1065,6 +1088,7 @@ def process_once(force=False):
                     item["addedAt"] = utc_now()
                     changed = True
                     LAST_RUN.update({"at": item["addedAt"], "message": f"Skipped (already present): {item['title']}"})
+                    push_liveblog(f"{item['title']} staat al in Sonarr. Ik ga door naar wat hierna komt.")
                     push_event("skipped", item["title"], "Already exists in Sonarr")
                     continue
                 service_request(config["sonarr"], "POST", "/series", payload)
@@ -1075,6 +1099,10 @@ def process_once(force=False):
             item["error"] = ""
             changed = True
             LAST_RUN.update({"at": item["addedAt"], "message": f"Added: {item['title']}"})
+            push_liveblog(f"{item['title']} is correct naar Radarr gestuurd en wordt nu door Radarr opgepakt.")
+            next_item = next((row for row in rows if row.get("status") == "todo"), None)
+            if next_item:
+                push_liveblog(f"De volgende zet ik alvast klaar in mijn hoofd: {next_item['title']}. Eerst laat ik Radarr deze afronden.")
             push_event("added", item["title"], "Added to downloader")
         except RuntimeError as error:
             error_text = str(error)
@@ -1084,12 +1112,14 @@ def process_once(force=False):
                 item["addedAt"] = utc_now()
                 changed = True
                 LAST_RUN.update({"at": item["addedAt"], "message": f"Skipped (unresolvable): {item['title']}"})
+                push_liveblog(f"Ik kan {item['title']} niet goed koppelen aan Radarr. Ik sla hem over zodat de wachtrij doorloopt.")
                 push_event("skipped", item["title"], "Unresolvable IMDb mapping")
             else:
                 item["status"] = "failed"
                 item["error"] = error_text
                 changed = True
                 LAST_RUN.update({"at": utc_now(), "message": f"Error for {item['title']}: {error}"})
+                push_liveblog(f"Er ging iets mis met {item['title']}: {error_text}")
                 push_event("failed", item["title"], error_text)
                 try:
                     send_webhook_notification(config, "run_failed", item["title"], error_text, {"externalId": item.get("externalId", "")})
@@ -1308,6 +1338,10 @@ def page(config, queue):
         f"<li><span><span class='pill event-pill {html.escape(e.get('level','info'))}'>{html.escape(e.get('level','info'))}</span> {html.escape(e.get('title',''))}</span><small>{html.escape(e.get('detail',''))}</small></li>"
         for e in LAST_EVENTS[:10]
     ) or "<li><span>No events yet</span><small>Driparr actions will appear here.</small></li>"
+    liveblog_rows = "\n".join(
+        f"<li><small>{html.escape(format_time_only(entry.get('at')))}</small><span>{html.escape(entry.get('message',''))}</span></li>"
+        for entry in LIVEBLOG[:12]
+    ) or "<li><small>--:--</small><span>Ik sta klaar. Zet de worker aan en ik begin met Radarr controleren.</span></li>"
     current_progress_html = (
         f"<div class='progress-wrap'><div class='progress-label'>{html.escape(progress_status)} {html.escape(current_eta)}</div><div class='progress-track'><div class='progress-fill' style='width:{int(progress_percent)}%'></div></div></div>"
         if current_item and isinstance(progress_percent, int)
@@ -1387,6 +1421,11 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 .feed-list h3 {{ margin:2px 0 10px; font-size:16px; }} .feed-list ul {{ list-style:none; margin:0; padding:0; max-height:270px; overflow:auto; }} .feed-list li {{ display:flex; justify-content:space-between; gap:10px; padding:7px 6px; border-bottom:1px solid #2a1f44; }}
 .feed-list li span {{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }} .feed-list li small {{ color:#a49ac2; font-size:12px; }}
 .dashboard-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }}
+.liveblog-panel {{ border-color:#594090; }}
+.liveblog-list ul {{ max-height:330px; }}
+.liveblog-list li {{ justify-content:flex-start; align-items:flex-start; }}
+.liveblog-list li small {{ flex:0 0 54px; color:#8fb7ff; font-weight:700; }}
+.liveblog-list li span {{ white-space:normal; overflow:visible; text-overflow:clip; line-height:1.35; }}
 .drip-card {{ padding:0; overflow:hidden; }}
 .drip-header {{ display:flex; justify-content:space-between; align-items:center; padding:14px 16px; border-bottom:1px solid #2e244a; }}
 .drip-stats {{ color:#d2c7f6; font-size:13px; font-weight:700; }}
@@ -1557,6 +1596,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
   </div>
 </div>
 <div class=\"dashboard-grid\">
+<div class=\"panel liveblog-panel\"><h3 style=\"margin-top:0\">Driparr liveblog</h3><p class=\"sub\">Ik vertel hier live wat ik achter de schermen aan het doen ben.</p><div class=\"feed-list liveblog-list\"><ul>{liveblog_rows}</ul></div></div>
 <div class=\"panel\"><h3 style=\"margin-top:0\">Recent Events</h3><p class=\"sub\">What Driparr has done recently.</p><div class=\"feed-list\"><ul>{event_rows}</ul></div></div>
 <div class=\"panel\"><h3 style=\"margin-top:0\" data-i18n=\"already_library\">Already in Library</h3><p class=\"sub\" data-i18n=\"already_library_sub\">Automatically skipped to prevent duplicates.</p><div class=\"feed-list\"><ul>{skipped_rows}</ul></div></div>
 <div class=\"panel\"><h3 style=\"margin-top:0\">Skipped: No Release</h3><p class=\"sub\">Radarr searched but did not grab a release, or reported no usable indexer.</p><div class=\"feed-list\"><ul>{no_indexer_rows}</ul></div></div>
