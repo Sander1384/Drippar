@@ -219,10 +219,12 @@ def queue_stats_for_source(rows, source_name):
     scoped = [r for r in rows if str(r.get("source", "")).strip() == src]
     total = len(scoped)
     todo = len([r for r in scoped if r.get("status") == "todo"])
-    added = len([r for r in scoped if r.get("status") == "added"])
+    active = len([r for r in scoped if r.get("status") in ("active", "added")])
+    completed = len([r for r in scoped if r.get("status") == "completed"])
+    added = len([r for r in scoped if r.get("status") in ("active", "added", "completed")])
     skipped = len([r for r in scoped if r.get("status") == "skipped"])
     failed = len([r for r in scoped if r.get("status") == "failed"])
-    return {"total": total, "todo": todo, "added": added, "skipped": skipped, "failed": failed}
+    return {"total": total, "todo": todo, "active": active, "completed": completed, "added": added, "skipped": skipped, "failed": failed}
 
 
 def push_run_history(config, entry):
@@ -239,12 +241,12 @@ def refresh_run_history(config, rows):
     for run in history:
         source_name = run.get("listName", "")
         stats = queue_stats_for_source(rows, source_name)
-        run["done"] = int(stats["total"] - stats["todo"])
+        run["done"] = int(stats["completed"] + stats["skipped"] + stats["failed"])
         run["total"] = int(stats["total"])
         run["added"] = int(stats["added"])
         run["skipped"] = int(stats["skipped"])
         run["failed"] = int(stats["failed"])
-        if stats["total"] > 0 and stats["todo"] == 0 and run.get("status") != "completed":
+        if stats["total"] > 0 and stats["todo"] == 0 and stats["active"] == 0 and run.get("status") != "completed":
             run["status"] = "completed"
             run["completedAt"] = utc_now()
             changed = True
@@ -725,6 +727,29 @@ def item_is_completed(config, item):
     return False
 
 
+def active_queue_items(rows):
+    return [row for row in rows if row.get("status") in ("active", "added")]
+
+
+def latest_active_item(rows):
+    latest = None
+    for row in active_queue_items(rows):
+        if not latest or row.get("addedAt", "") > latest.get("addedAt", ""):
+            latest = row
+    return latest
+
+
+def refresh_completed_items(config, rows):
+    changed = False
+    for row in active_queue_items(rows):
+        if item_is_completed(config, row):
+            row["status"] = "completed"
+            row["error"] = ""
+            changed = True
+            push_event("completed", row["title"], "Radarr reports the movie file is available")
+    return changed
+
+
 def current_movie_eta(config, item):
     if item.get("type") != "movie":
         return ""
@@ -786,30 +811,35 @@ def process_once(force=False):
     changed = False
     drip_mode = config["app"].get("dripMode", "sync")
 
-    if drip_mode == "sync" and not force:
-        last_added = None
-        for row in rows:
-            if row.get("status") == "added":
-                if not last_added or row.get("addedAt", "") > last_added.get("addedAt", ""):
-                    last_added = row
-        if last_added:
-            try:
-                if not item_is_completed(config, last_added):
-                    LAST_RUN.update(
-                        {
-                            "at": utc_now(),
-                            "message": f"Sync mode: waiting for completion of {last_added['title']}.",
-                        }
-                    )
-                    return
-            except RuntimeError as error:
-                LAST_RUN.update({"at": utc_now(), "message": f"Sync check error: {error}"})
-                return
+    try:
+        if refresh_completed_items(config, rows):
+            changed = True
+    except RuntimeError as error:
+        LAST_RUN.update({"at": utc_now(), "message": f"Sync check error: {error}"})
+        return
+
+    active_item = latest_active_item(rows)
+    if drip_mode == "sync" and active_item:
+        LAST_RUN.update(
+            {
+                "at": utc_now(),
+                "message": f"Sync mode: waiting for Radarr to finish {active_item['title']}.",
+            }
+        )
+        if changed:
+            write_queue(rows)
+            if refresh_run_history(config, rows):
+                save_config(config)
+        return
 
     max_items = int(config["app"].get("maxItemsPerRun", 1))
     selected = [row for row in rows if row["status"] == "todo"][:max_items]
     if not selected:
         LAST_RUN.update({"at": utc_now(), "message": "No todo items."})
+        if changed:
+            write_queue(rows)
+            if refresh_run_history(config, rows):
+                save_config(config)
         return
 
     for item in selected:
@@ -841,7 +871,7 @@ def process_once(force=False):
                 service_request(config["sonarr"], "POST", "/series", payload)
             else:
                 raise RuntimeError(f"Unknown media type: {item['type']}")
-            item["status"] = "added"
+            item["status"] = "active"
             item["addedAt"] = utc_now()
             item["error"] = ""
             changed = True
@@ -987,6 +1017,10 @@ def page(config, queue):
             return "In queue for next drip"
         if status == "skipped":
             return "Already in library"
+        if status in ("active", "added"):
+            return "Added to Radarr; waiting until Radarr reports a movie file"
+        if status == "completed":
+            return "Radarr reports the movie file is available"
         reason = str(row.get("error", "")).strip()
         if not reason:
             return ""
@@ -1025,7 +1059,8 @@ def page(config, queue):
     step3_done = config.get("app", {}).get("dripMode") in ("timed", "sync")
     step4_done = worker_enabled
     todo = [r for r in queue if r.get("status") == "todo"]
-    completed = [r for r in queue if r.get("status") == "added"]
+    active = [r for r in queue if r.get("status") in ("active", "added")]
+    completed = [r for r in queue if r.get("status") == "completed"]
     skipped = [r for r in queue if r.get("status") == "skipped"]
     failed = [r for r in queue if r.get("status") == "failed"]
     todo_positions = {}
@@ -1036,20 +1071,28 @@ def page(config, queue):
             if key:
                 todo_positions[key] = pos_counter
                 pos_counter += 1
+    def display_status(row):
+        status = str(row.get("status", "")).strip().lower()
+        return "active" if status == "added" else status
     queue_rows = "\n".join(
-        f"<tr><td>{html.escape(row['type'])}</td><td>{html.escape(row['title'])}</td><td>{html.escape(row['externalId'])}</td><td><span class='pill {html.escape(row['status'])}'>{html.escape(row['status'])}</span></td><td>{html.escape(row['source'])}</td><td>{html.escape(present_queue_reason(row, todo_positions))}</td></tr>"
+        f"<tr><td>{html.escape(row['type'])}</td><td>{html.escape(row['title'])}</td><td>{html.escape(row['externalId'])}</td><td><span class='pill {html.escape(display_status(row))}'>{html.escape(display_status(row))}</span></td><td>{html.escape(row['source'])}</td><td>{html.escape(present_queue_reason(row, todo_positions))}</td></tr>"
         for row in queue[-140:]
     )
     queued_rows = "\n".join(
         f"<li class='timeline-item timeline-queued'><span class='dot'><img src='/assets/wall-clock.svg' alt='Queued'></span><div><span class='badge b-orange'>Queued</span><span>{html.escape(r['title'])}</span><small>{html.escape(r['externalId'])}</small></div></li>"
         for r in todo[:2]
     ) or "<li class='timeline-item timeline-queued'><span class='dot'><img src='/assets/wall-clock.svg' alt='Queued'></span><div><span class='badge b-orange'>Queued</span><span>No todo items</span><small>Queue is empty</small></div></li>"
+    latest_active = sorted(
+        [r for r in active if r.get("addedAt")],
+        key=lambda x: x.get("addedAt", ""),
+        reverse=True,
+    )
     latest_completed = sorted(
         [r for r in completed if r.get("addedAt")],
         key=lambda x: x.get("addedAt", ""),
         reverse=True,
     )
-    current_item = latest_completed[0] if latest_completed else None
+    current_item = latest_active[0] if latest_active else None
     progress = current_movie_progress(config, current_item) if current_item else {"eta": "", "percent": None, "status": ""}
     current_eta = progress.get("eta", "")
     progress_percent = progress.get("percent")
@@ -1074,7 +1117,7 @@ def page(config, queue):
     )
     done_rows = "\n".join(
         f"<li class='timeline-item timeline-completed'><span class='dot'><img src='/assets/wall-clock.svg' alt='Completed'></span><div><span class='badge b-green'>Completed</span><span>{html.escape(r['title'])}</span><small class='completed-time' data-ts='{html.escape(r.get('addedAt',''))}'></small></div></li>"
-        for r in latest_completed[1:3]
+        for r in latest_completed[:2]
     ) or "<li class='timeline-item timeline-completed'><span class='dot'><img src='/assets/wall-clock.svg' alt='Completed'></span><div><span class='badge b-green'>Completed</span><span>Nothing added yet</span><small>Run the worker to start</small></div></li>"
     app_cfg = config.get("app", {})
     show_onboarding = (not bool(app_cfg.get("setupComplete"))) or (
@@ -1089,15 +1132,17 @@ def page(config, queue):
         source = str(row.get("source", "")).strip()
         if not source:
             continue
-        bucket = progress_by_source.setdefault(source, {"total": 0, "done": 0, "todo": 0})
+        bucket = progress_by_source.setdefault(source, {"total": 0, "done": 0, "todo": 0, "active": 0})
         bucket["total"] += 1
         if row.get("status") == "todo":
             bucket["todo"] += 1
+        elif row.get("status") in ("active", "added"):
+            bucket["active"] += 1
         else:
             bucket["done"] += 1
     list_rows = "\n".join(
         (
-            f"<tr><td>{i + 1}</td><td>{html.escape(item.get('name',''))}</td><td>{html.escape(item.get('type',''))}</td><td>{html.escape(item.get('mediaType',''))}</td><td>{html.escape(item.get('url','CSV import'))}</td><td><span class='pill {'added' if ((progress_by_source.get(str(item.get('name','')).strip(),{}).get('todo',0)==0) and (progress_by_source.get(str(item.get('name','')).strip(),{}).get('total',0)>0)) else 'todo'}'>{progress_by_source.get(str(item.get('name','')).strip(),{}).get('done',0)}/{progress_by_source.get(str(item.get('name','')).strip(),{}).get('total',0)}{' done' if ((progress_by_source.get(str(item.get('name','')).strip(),{}).get('todo',0)==0) and (progress_by_source.get(str(item.get('name','')).strip(),{}).get('total',0)>0)) else ''}</span></td><td><button class='btn danger' onclick='deleteList({i})'>Delete</button></td></tr>"
+            f"<tr><td>{i + 1}</td><td>{html.escape(item.get('name',''))}</td><td>{html.escape(item.get('type',''))}</td><td>{html.escape(item.get('mediaType',''))}</td><td>{html.escape(item.get('url','CSV import'))}</td><td><span class='pill {'completed' if ((progress_by_source.get(str(item.get('name','')).strip(),{}).get('todo',0)==0) and (progress_by_source.get(str(item.get('name','')).strip(),{}).get('active',0)==0) and (progress_by_source.get(str(item.get('name','')).strip(),{}).get('total',0)>0)) else 'todo'}'>{progress_by_source.get(str(item.get('name','')).strip(),{}).get('done',0)}/{progress_by_source.get(str(item.get('name','')).strip(),{}).get('total',0)}{' done' if ((progress_by_source.get(str(item.get('name','')).strip(),{}).get('todo',0)==0) and (progress_by_source.get(str(item.get('name','')).strip(),{}).get('active',0)==0) and (progress_by_source.get(str(item.get('name','')).strip(),{}).get('total',0)>0)) else ''}</span></td><td><button class='btn danger' onclick='deleteList({i})'>Delete</button></td></tr>"
         )
         for i, item in enumerate(config.get("lists", []))
     ) or "<tr><td colspan='7' style='color:#a49ac2'>No saved lists yet</td></tr>"
@@ -1130,7 +1175,7 @@ input:focus,select:focus {{ outline:none; border-color:#8661eb; box-shadow:0 0 0
 .file-chip {{ flex:1; min-width:220px; border:1px dashed #4d3a86; background:#120b26; border-radius:10px; padding:10px 12px; color:#bdb1e3; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
 .file-chip.has-file {{ border-style:solid; border-color:#6e54c5; color:#e9e1ff; background:#1a1330; }}
 table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-bottom:1px solid #312453; text-align:left; }} th {{ color:#a79ac9; font-size:12px; text-transform:uppercase; letter-spacing:.35px; }}
-.pill {{ display:inline-block; border-radius:7px; padding:3px 8px; font-size:12px; font-weight:700; }} .pill.todo {{ background:#392c11; color:var(--yellow); }} .pill.added {{ background:#123425; color:var(--green); }} .pill.failed {{ background:#3a1320; color:var(--red); }} .pill.skipped {{ background:#2d2742; color:#cbb9ff; }}
+.pill {{ display:inline-block; border-radius:7px; padding:3px 8px; font-size:12px; font-weight:700; }} .pill.todo {{ background:#392c11; color:var(--yellow); }} .pill.active,.pill.added {{ background:#102f45; color:#7ed7ff; }} .pill.completed {{ background:#123425; color:var(--green); }} .pill.failed {{ background:#3a1320; color:var(--red); }} .pill.skipped {{ background:#2d2742; color:#cbb9ff; }}
 .feed-list {{ background:#100a20; border:1px solid #2f2450; border-radius:12px; padding:12px; }}
 .feed-list h3 {{ margin:2px 0 10px; font-size:16px; }} .feed-list ul {{ list-style:none; margin:0; padding:0; max-height:270px; overflow:auto; }} .feed-list li {{ display:flex; justify-content:space-between; gap:10px; padding:7px 6px; border-bottom:1px solid #2a1f44; }}
 .feed-list li span {{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }} .feed-list li small {{ color:#a49ac2; font-size:12px; }}
@@ -1159,6 +1204,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 .event-pill.info {{ background:#1a2d52; color:#7db0ff; }}
 .event-pill.added {{ background:#113826; color:#66e7aa; }}
 .event-pill.skipped {{ background:#3f2d11; color:#ffbe3d; }}
+.event-pill.completed {{ background:#123425; color:#35d68b; }}
 .event-pill.failed {{ background:#3a1320; color:#ff809c; }}
 .instance-card {{ display:flex; justify-content:space-between; align-items:center; gap:10px; }} .instance-title {{ font-size:22px; font-weight:800; }} .enabled-pill {{ background:#123c2a; color:#3fe08f; padding:4px 8px; border-radius:7px; font-size:12px; font-weight:700; }} .disabled-pill {{ background:#3b1622; color:#ff7f96; padding:4px 8px; border-radius:7px; font-size:12px; font-weight:700; border:1px solid #7f3247; }} .instance-actions {{ display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }}
 .connected-pill {{ margin-left:auto; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; }}
@@ -1298,7 +1344,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
         <small id=\"workerStateText\" class=\"state-pill\" data-i18n=\"worker_state_on\">Start</small>
       </div>
       <span class=\"queue-meta\">Queue: {len(queue)} items</span>
-      <button class=\"btn secondary\" onclick=\"forceNext()\" {'disabled' if len(queue) == 0 else ''}>Force Next</button>
+      <button class=\"btn secondary\" onclick=\"forceNext()\" {'disabled' if len(queue) == 0 else ''}>Check Radarr</button>
       <button class=\"btn secondary\" onclick=\"clearQueue()\" {'disabled' if len(queue) == 0 else ''}>Clear all</button>
     </div>
   </div>
@@ -2211,7 +2257,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/force-next":
                 with LOCK:
                     process_once(force=True)
-                push_event("info", "Force next", LAST_RUN["message"])
+                push_event("info", "Radarr check", LAST_RUN["message"])
                 self.respond(200, json.dumps({"ok": True, "message": LAST_RUN["message"], "reload": True}), "application/json")
                 return
 
