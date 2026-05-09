@@ -1842,21 +1842,13 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 .feed-list h3 {{ margin:2px 0 10px; font-size:16px; }} .feed-list ul {{ list-style:none; margin:0; padding:0; max-height:270px; overflow:auto; }} .feed-list li {{ display:flex; justify-content:space-between; gap:10px; padding:7px 6px; border-bottom:1px solid #2a1f44; }}
 .feed-list li span {{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }} .feed-list li small {{ color:#a49ac2; font-size:12px; }}
 .dashboard-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }}
-.liveblog-panel {{ border-color:#594090; background:linear-gradient(160deg,#17102a,#120b22); }}
-.liveblog-list ul {{ max-height:330px; }}
-.liveblog-list li {{ justify-content:flex-start; align-items:flex-start; border-left:3px solid transparent; padding-left:9px; transition:background .16s ease, border-color .16s ease; }}
-.liveblog-list li:first-child {{ background:rgba(125,75,255,.12); border-color:#8f62ff; border-radius:8px; }}
-.liveblog-list li.mood-completed {{ border-color:#35d68b; }}
-.liveblog-list li.mood-failed {{ border-color:#ff7f96; }}
-.liveblog-list li.mood-skipped_no_indexer,.liveblog-list li.mood-skipped {{ border-color:#ffbe3d; }}
-.liveblog-list li.mood-waiting {{ border-color:#7db0ff; }}
-.liveblog-list li.mood-adding,.liveblog-list li.mood-added {{ border-color:#66e7aa; }}
+.liveblog-panel {{ border-color:#594090; }}
+.liveblog-list ul {{ max-height:none; overflow:visible; }}
+.liveblog-list li {{ justify-content:flex-start; align-items:flex-start; }}
 .liveblog-list li small {{ flex:0 0 54px; color:#8fb7ff; font-weight:700; }}
 .liveblog-list li span {{ white-space:normal; overflow:visible; text-overflow:clip; line-height:1.35; }}
 .liveblog-head {{ display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:start; gap:12px; }}
 .liveblog-head h3 {{ margin:0; }}
-.liveblog-chip {{ display:inline-flex; align-items:center; gap:6px; margin-top:8px; padding:4px 9px; border:1px solid #4f3a84; border-radius:999px; color:#cabcf0; background:#171027; font-size:12px; font-weight:800; }}
-.liveblog-chip:before {{ content:""; width:7px; height:7px; border-radius:999px; background:#7dffb1; box-shadow:0 0 10px rgba(125,255,177,.45); }}
 .rabbit-mood {{ width:40px; min-width:40px; height:40px; display:grid; place-items:center; align-self:start; margin-top:1px; }}
 .rabbit-mood img {{ width:36px; height:36px; object-fit:contain; filter:invert(93%) sepia(14%) saturate(773%) hue-rotate(207deg) brightness(105%) contrast(102%); }}
 .drip-card {{ padding:0; overflow:hidden; }}
@@ -2035,7 +2027,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
   </div>
 </div>
 <div class=\"dashboard-grid\">
-<div class=\"panel liveblog-panel\"><div class=\"liveblog-head\"><div><h3>Driparr liveblog</h3><p class=\"sub\" style=\"margin-bottom:10px\">Ik vertel hier live wat ik achter de schermen aan het doen ben.</p><span class=\"liveblog-chip\" data-i18n=\"liveblog_chip\">Live status feed</span></div><div class=\"rabbit-mood\" title=\"Driparr voelt zich {html.escape(rabbit_mood['label'])}\"><img id=\"rabbitMoodImg\" src=\"{html.escape(rabbit_mood['src'])}\" data-mood=\"{html.escape(LIVEBLOG[0].get('mood') if LIVEBLOG else 'idle')}\" alt=\"Driparr rabbit mood: {html.escape(rabbit_mood['label'])}\"></div></div><div class=\"feed-list liveblog-list\"><ul id=\"liveblogRows\">{liveblog_rows}</ul></div></div>
+<div class=\"panel liveblog-panel\"><div class=\"liveblog-head\"><div><h3>Driparr liveblog</h3><p class=\"sub\" style=\"margin-bottom:10px\">Ik vertel hier live wat ik achter de schermen aan het doen ben.</p></div><div class=\"rabbit-mood\" data-mood-label=\"{html.escape(rabbit_mood['label'])}\" title=\"Driparr voelt zich {html.escape(rabbit_mood['label'])}\"><img id=\"rabbitMoodImg\" src=\"{html.escape(rabbit_mood['src'])}\" data-mood=\"{html.escape(LIVEBLOG[0].get('mood') if LIVEBLOG else 'idle')}\" alt=\"Driparr rabbit mood: {html.escape(rabbit_mood['label'])}\"></div></div><div class=\"feed-list liveblog-list\"><ul id=\"liveblogRows\">{liveblog_rows}</ul></div></div>
 <div class=\"panel\"><h3 style=\"margin-top:0\">Recent Events</h3><p class=\"sub\">What Driparr has done recently.</p><div class=\"feed-list\"><ul>{event_rows}</ul></div></div>
 <div class=\"panel\"><h3 style=\"margin-top:0\" data-i18n=\"already_library\">Already in Library</h3><p class=\"sub\" data-i18n=\"already_library_sub\">Automatically skipped to prevent duplicates.</p><div class=\"feed-list\"><ul>{skipped_rows}</ul></div></div>
 <div class=\"panel\"><h3 style=\"margin-top:0\">Skipped: No Release</h3><p class=\"sub\">Radarr searched but did not grab a release, or reported no usable indexer.</p><div class=\"feed-list\"><ul>{no_indexer_rows}</ul></div></div>
@@ -2080,14 +2072,46 @@ const rabbitIdleFaces = [
 ];
 let rabbitIdleIndex = 0;
 let lastLiveblogSignature = '';
+function rabbitLabelText(label) {{
+  const lang = detectLanguage();
+  const key = String(label || '').toLowerCase();
+  const labels = {{
+    en: {{
+      slaperig:'sleepy', nadenkend:'thinking', waakzaam:'watchful', optimistisch:'optimistic',
+      lachend:'laughing', blij:'happy', geirriteerd:'annoyed', verdrietig:'sad',
+      verveeld:'bored', cool:'cool', ongemakkelijk:'uneasy', grinnikend:'chuckling',
+      plagerig:'teasing', eigenwijs:'stubborn', brutaal:'cheeky', tevreden:'content',
+      vrolijk:'cheerful', verrast:'surprised'
+    }},
+    de: {{
+      slaperig:'schläfrig', nadenkend:'nachdenklich', waakzaam:'wachsam', optimistisch:'optimistisch',
+      lachend:'lachend', blij:'glücklich', geirriteerd:'genervt', verdrietig:'traurig',
+      verveeld:'gelangweilt', cool:'cool', ongemakkelijk:'unbehaglich', grinnikend:'schmunzelnd',
+      plagerig:'neckisch', eigenwijs:'eigensinnig', brutaal:'frech', tevreden:'zufrieden',
+      vrolijk:'fröhlich', verrast:'überrascht'
+    }}
+  }};
+  return (labels[lang] && labels[lang][key]) || label || '';
+}}
+function rabbitTitle(label) {{
+  const lang = detectLanguage();
+  const translated = rabbitLabelText(label);
+  if (lang === 'de') return `Driparr ist ${{translated}}`;
+  if (lang === 'nl') return `Driparr voelt zich ${{translated}}`;
+  return `Driparr is ${{translated}}`;
+}}
 function setRabbitFace(src, label, mood) {{
   const img = document.getElementById('rabbitMoodImg');
   if (!img) return;
   const holder = img.closest('.rabbit-mood');
   img.src = `/rabbit-emoji/${{src}}`;
   img.dataset.mood = mood || label || '';
-  img.alt = `Driparr rabbit mood: ${{label}}`;
-  if (holder) holder.title = `Driparr voelt zich ${{label}}`;
+  img.dataset.moodLabel = label || '';
+  img.alt = `Driparr rabbit mood: ${{rabbitLabelText(label)}}`;
+  if (holder) {{
+    holder.dataset.moodLabel = label || '';
+    holder.title = rabbitTitle(label);
+  }}
 }}
 function startRabbitMoodLoop() {{
   setInterval(() => {{
@@ -2297,12 +2321,23 @@ function renderLiveblog(entries) {{
     return `<li class="mood-${{escapeHtml(mood)}}"><small>${{escapeHtml(time)}}</small><span>${{escapeHtml(message)}}</span></li>`;
   }}).join('') || `<li class="mood-idle"><small>--:--</small><span>${{escapeHtml(uiText('ready_liveblog'))}}</span></li>`;
 }}
+function preserveViewport(callback) {{
+  const x = window.scrollX;
+  const y = window.scrollY;
+  const active = document.activeElement;
+  callback();
+  requestAnimationFrame(() => {{
+    if (document.activeElement === active && (window.scrollX !== x || window.scrollY !== y)) {{
+      window.scrollTo(x, y);
+    }}
+  }});
+}}
 async function pollLiveblog() {{
   try {{
     const response = await fetch('/api/liveblog', {{headers:{{Accept:'application/json'}}}});
     if (!response.ok) return;
     const data = await response.json();
-    renderLiveblog(data.entries || []);
+    preserveViewport(() => renderLiveblog(data.entries || []));
     const first = (data.entries || [])[0] || {{}};
     const signature = `${{first.time || ''}}|${{first.message || ''}}|${{data.mood || 'idle'}}`;
     const hasNewMessage = signature && signature !== lastLiveblogSignature;
@@ -2374,8 +2409,10 @@ async function pollDashboardTimeline() {{
     const response = await fetch('/api/dashboard-timeline', {{headers:{{Accept:'application/json'}}}});
     if (!response.ok) return;
     const data = await response.json();
-    renderDashboardTimeline(data);
-    renderQueueTable(data.queueRows || []);
+    preserveViewport(() => {{
+      renderDashboardTimeline(data);
+      renderQueueTable(data.queueRows || []);
+    }});
   }} catch (e) {{}}
 }}
 function detectLanguage() {{
@@ -2601,6 +2638,15 @@ function applyI18n() {{
   if (liveHead) liveHead.textContent = uiText('liveblog_title');
   const liveSub = document.querySelector('.liveblog-head .sub');
   if (liveSub) liveSub.textContent = uiText('liveblog_sub');
+  const rabbitHolder = document.querySelector('.rabbit-mood');
+  if (rabbitHolder) {{
+    const label = rabbitHolder.dataset.moodLabel || document.getElementById('rabbitMoodImg')?.dataset.moodLabel || '';
+    if (label) rabbitHolder.title = rabbitTitle(label);
+  }}
+  const rabbitImg = document.getElementById('rabbitMoodImg');
+  if (rabbitImg && rabbitImg.dataset.moodLabel) {{
+    rabbitImg.alt = `Driparr rabbit mood: ${{rabbitLabelText(rabbitImg.dataset.moodLabel)}}`;
+  }}
   const dashboardPanels = document.querySelectorAll('.dashboard-grid .panel');
   if (dashboardPanels[1]) {{
     const h3 = dashboardPanels[1].querySelector('h3');
