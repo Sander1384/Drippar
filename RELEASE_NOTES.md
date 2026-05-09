@@ -1,9 +1,10 @@
-# Driparr v0.1.10
+# Driparr v0.1.11
 
 Liveblog rabbit mood UI release for Driparr.
 
 This release fixes liveblog future check times so they use the same local timezone as the visible liveblog timestamp.
 It also skips Radarr movies that are monitored, available, missing, and have no queued download or grabbed release after a short grace period.
+Sync mode now checks Radarr every minute by default, and missing monitored movies are skipped after roughly 30 seconds when Radarr shows no queued download.
 
 ## Highlights
 
@@ -28,7 +29,7 @@ Create a data folder and a `docker-compose.yml`:
 ```yaml
 services:
   driparr:
-    image: ghcr.io/sander1384/driparr:v0.1.10
+    image: ghcr.io/sander1384/driparr:v0.1.11
     container_name: driparr
     restart: unless-stopped
     ports:

@@ -202,9 +202,9 @@ def env_force_language():
 
 def env_sync_poll_seconds():
     try:
-        return max(60, int(os.getenv("DRIPARR_SYNC_POLL_SECONDS", "600") or "600"))
+        return max(15, int(os.getenv("DRIPARR_SYNC_POLL_SECONDS", "60") or "60"))
     except ValueError:
-        return 600
+        return 60
 
 
 def hash_password(password, salt):
@@ -809,11 +809,13 @@ def queue_entry_is_complete(entry):
 
 def movie_is_available_for_download(movie):
     status = str(movie.get("status") or "").strip().lower()
-    if status in {"released", "available", "digital", "physical"}:
+    if status in {"released", "available", "digital", "physical", "missing"}:
         return True
     for key in ("isAvailable", "isReleased"):
         if bool(movie.get(key)):
             return True
+    if status not in {"announced", "incinemas", "in cinemas", "unreleased"}:
+        return True
     return False
 
 
@@ -970,7 +972,7 @@ def radarr_movie_status(config, item):
         return {"state": "skipped_no_indexer", "reason": f"No usable indexer in Radarr: {indexer_reason}"}
 
     age_minutes = minutes_since(item.get("addedAt"))
-    if movie_is_missing_and_monitored(movie) and age_minutes is not None and age_minutes >= 2:
+    if movie_is_missing_and_monitored(movie) and age_minutes is not None and age_minutes >= 0.5:
         return {
             "state": "skipped_no_indexer",
             "reason": "Radarr marks the monitored movie as missing, with no queued download or grabbed release.",
