@@ -1180,6 +1180,50 @@ def current_movie_progress(config, item):
     return {"eta": "", "percent": None, "status": ""}
 
 
+def dashboard_timeline_payload(config, queue):
+    todo = [r for r in queue if r.get("status") == "todo"]
+    active = [r for r in queue if r.get("status") in ACTIVE_STATUSES]
+    completed = [r for r in queue if r.get("status") == "completed"]
+    skipped = [r for r in queue if r.get("status") in SKIPPED_STATUSES]
+    latest_active = sorted(
+        [r for r in active if r.get("addedAt")],
+        key=lambda x: x.get("addedAt", ""),
+        reverse=True,
+    )
+    latest_completed = sorted(
+        [r for r in completed if r.get("addedAt")],
+        key=lambda x: x.get("addedAt", ""),
+        reverse=True,
+    )
+    current_item = latest_active[0] if latest_active else None
+    progress = current_movie_progress(config, current_item) if current_item else {"eta": "", "percent": None, "status": ""}
+    total_items = len(queue)
+    done_items = len(completed)
+    skipped_items = len(skipped)
+    return {
+        "summary": f"{done_items}/{total_items} - skipped {skipped_items}" if total_items else "0/0 - skipped 0",
+        "queueCount": total_items,
+        "queued": [
+            {"title": r.get("title", ""), "externalId": r.get("externalId", "")}
+            for r in todo[:2]
+        ],
+        "current": (
+            {
+                "title": current_item.get("title", ""),
+                "eta": progress.get("eta", ""),
+                "percent": progress.get("percent"),
+                "status": progress.get("status", ""),
+            }
+            if current_item
+            else None
+        ),
+        "completed": [
+            {"title": r.get("title", ""), "addedAt": r.get("addedAt", "")}
+            for r in latest_completed[:2]
+        ],
+    }
+
+
 def discover_radarr_options(service):
     profiles = service_request(service, "GET", "/qualityprofile")
     folders = service_request(service, "GET", "/rootfolder")
@@ -1752,18 +1796,18 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 </nav></aside><main>
 <section id=\"dashboard\" class=\"tab active\"><h1 data-i18n=\"dashboard\">Dashboard</h1><p class=\"sub\" data-i18n=\"dashboard_sub\">Live overzicht van queue, huidige drip en afgeronde items.</p>
 <div class=\"panel drip-card\">
-  <div class=\"drip-header\"><b data-i18n=\"drip_timeline\">Drip Timeline</b><span class=\"drip-stats\">{summary_text}</span><a class=\"view-all\" href=\"#\" onclick=\"openTab('queue');return false;\" data-i18n=\"view_all_queue\">View all queue</a></div>
+  <div class=\"drip-header\"><b data-i18n=\"drip_timeline\">Drip Timeline</b><span id=\"dripStats\" class=\"drip-stats\">{summary_text}</span><a class=\"view-all\" href=\"#\" onclick=\"openTab('queue');return false;\" data-i18n=\"view_all_queue\">View all queue</a></div>
   <div class=\"timeline\">
     <div class=\"line-sub\" style=\"margin:4px 0 8px\" data-i18n=\"next_queued\">Next 2 queued</div>
-    <ul>
+    <ul id=\"queuedRows\">
       {queued_rows}
     </ul>
     <div class=\"line-sub\" style=\"margin:10px 0 8px\" data-i18n=\"current_drip\">Current drip</div>
-    <ul>
+    <ul id=\"currentDripRows\">
       {current_drip_row}
     </ul>
     <div class=\"line-sub\" style=\"margin:10px 0 8px\" data-i18n=\"last_completed\">Last 2 completed</div>
-    <ul>
+    <ul id=\"completedRows\">
       {done_rows}
     </ul>
   </div>
@@ -1777,7 +1821,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
         </label>
         <small id=\"workerStateText\" class=\"state-pill\" data-i18n=\"worker_state_on\">Start</small>
       </div>
-      <span class=\"queue-meta\">Queue: {len(queue)} items</span>
+      <span id=\"queueMeta\" class=\"queue-meta\">Queue: {len(queue)} items</span>
       <button class=\"btn secondary\" onclick=\"forceNext()\" {'disabled' if len(queue) == 0 else ''}>Check Radarr</button>
       <button class=\"btn secondary\" onclick=\"clearQueue()\" {'disabled' if len(queue) == 0 else ''}>Clear all</button>
     </div>
@@ -1875,6 +1919,63 @@ async function pollLiveblog() {{
     const hasNewMessage = signature && signature !== lastLiveblogSignature;
     lastLiveblogSignature = signature;
     updateRabbitMood(data.mood || 'idle', hasNewMessage);
+  }} catch (e) {{}}
+}}
+function renderProgress(progress) {{
+  const rawPercent = progress?.percent;
+  const percent = Number(rawPercent);
+  const eta = String(progress?.eta || '');
+  const status = String(progress?.status || '');
+  if (rawPercent !== null && rawPercent !== undefined && Number.isInteger(percent)) {{
+    return `<div class="progress-wrap"><div class="progress-label">${{escapeHtml(`${{status}} ${{eta}}`.trim())}}</div><div class="progress-track"><div class="progress-fill" style="width:${{Math.max(0, Math.min(100, percent))}}%"></div></div></div>`;
+  }}
+  return eta ? `<small>${{escapeHtml(eta)}}</small>` : '<small></small>';
+}}
+function formatTimelineTime(value) {{
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const lang = document.documentElement.lang || detectLanguage();
+  return new Intl.DateTimeFormat(lang, {{hour:'2-digit', minute:'2-digit'}}).format(date);
+}}
+function renderDashboardTimeline(data) {{
+  if (!data || !data.ok) return;
+  const stats = document.getElementById('dripStats');
+  if (stats) stats.textContent = data.summary || '0/0 - skipped 0';
+  const queueMeta = document.getElementById('queueMeta');
+  if (queueMeta) queueMeta.textContent = `Queue: ${{Number(data.queueCount || 0)}} items`;
+
+  const queuedRows = document.getElementById('queuedRows');
+  const queued = Array.isArray(data.queued) ? data.queued : [];
+  if (queuedRows) {{
+    queuedRows.innerHTML = queued.map((item) => `
+      <li class="timeline-item timeline-queued"><span class="dot"><img src="/assets/wall-clock.svg" alt="Queued"></span><div><span class="badge b-orange">Queued</span><span>${{escapeHtml(item.title || '')}}</span><small>${{escapeHtml(item.externalId || '')}}</small></div></li>
+    `).join('') || '<li class="timeline-item timeline-queued"><span class="dot"><img src="/assets/wall-clock.svg" alt="Queued"></span><div><span class="badge b-orange">Queued</span><span>No todo items</span><small>Queue is empty</small></div></li>';
+  }}
+
+  const currentRows = document.getElementById('currentDripRows');
+  if (currentRows) {{
+    if (data.current) {{
+      currentRows.innerHTML = `<li class="timeline-item timeline-current"><span class="dot"><img src="/assets/water-drop.svg" alt="Current"></span><div><span class="badge b-blue">Current</span><span>${{escapeHtml(data.current.title || '')}}</span>${{renderProgress(data.current)}}</div></li>`;
+    }} else {{
+      currentRows.innerHTML = '<li class="timeline-item timeline-current"><span class="dot"><img src="/assets/water-drop.svg" alt="Current"></span><div><span class="badge b-blue">Current</span><span>No active drip yet</span><small></small></div></li>';
+    }}
+  }}
+
+  const completedRows = document.getElementById('completedRows');
+  const completed = Array.isArray(data.completed) ? data.completed : [];
+  if (completedRows) {{
+    completedRows.innerHTML = completed.map((item) => `
+      <li class="timeline-item timeline-completed"><span class="dot"><img src="/assets/wall-clock.svg" alt="Completed"></span><div><span class="badge b-green">Completed</span><span>${{escapeHtml(item.title || '')}}</span><small class="completed-time" data-ts="${{escapeHtml(item.addedAt || '')}}">${{escapeHtml(formatTimelineTime(item.addedAt))}}</small></div></li>
+    `).join('') || '<li class="timeline-item timeline-completed"><span class="dot"><img src="/assets/wall-clock.svg" alt="Completed"></span><div><span class="badge b-green">Completed</span><span>Nothing added yet</span><small>Run the worker to start</small></div></li>';
+  }}
+  applyI18n();
+}}
+async function pollDashboardTimeline() {{
+  try {{
+    const response = await fetch('/api/dashboard-timeline', {{headers:{{Accept:'application/json'}}}});
+    if (!response.ok) return;
+    renderDashboardTimeline(await response.json());
   }} catch (e) {{}}
 }}
 function detectLanguage() {{
@@ -2052,6 +2153,7 @@ async function post(url, data) {{
   }}
   toast(j.message || (j.ok ? 'Saved' : 'Error'));
   if (j.reload) setTimeout(()=>location.reload(), 650);
+  if (j && j.ok) setTimeout(pollDashboardTimeline, 250);
   return j;
 }}
 function toast(msg) {{ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none',3000); }}
@@ -2460,7 +2562,9 @@ async function logout() {{ await post('/api/logout', {{}}); location.href='/logi
 applyI18n();
 startRabbitMoodLoop();
 pollLiveblog();
+pollDashboardTimeline();
 setInterval(pollLiveblog, 5000);
+setInterval(pollDashboardTimeline, 5000);
 (() => {{
   const next = localStorage.getItem('driparr_next_step');
   if (next === 'lists') {{
@@ -2581,6 +2685,11 @@ class Handler(BaseHTTPRequestHandler):
                 for entry in LIVEBLOG[:12]
             ]
             self.respond(200, json.dumps({"ok": True, "mood": mood, "entries": entries}), "application/json")
+            return
+        if path == "/api/dashboard-timeline":
+            queue = read_queue()
+            payload = dashboard_timeline_payload(config, queue)
+            self.respond(200, json.dumps({"ok": True, **payload}), "application/json")
             return
         if path == "/setup":
             self.respond(302, "", location="/")
