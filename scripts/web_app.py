@@ -36,6 +36,32 @@ MAX_REQUEST_BYTES = 2 * 1024 * 1024
 MAX_CSV_CHARS = 2 * 1024 * 1024
 
 
+def detect_app_version():
+    env_version = os.getenv("DRIPARR_VERSION", "").strip()
+    if env_version:
+        return env_version.lstrip("v")
+    release_notes = ROOT / "RELEASE_NOTES.md"
+    try:
+        first_line = release_notes.read_text(encoding="utf-8").splitlines()[0]
+        match = re.search(r"\bv?(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9_.-]+)?)\b", first_line)
+        if match:
+            return match.group(1)
+    except Exception:
+        pass
+    compose_file = ROOT / "docker-compose.portainer.yml"
+    try:
+        text = compose_file.read_text(encoding="utf-8")
+        match = re.search(r"ghcr\.io/sander1384/driparr:v?([A-Za-z0-9_.-]+)", text)
+        if match:
+            return match.group(1)
+    except Exception:
+        pass
+    return "dev"
+
+
+APP_VERSION = detect_app_version()
+
+
 def utc_now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -205,6 +231,13 @@ def env_sync_poll_seconds():
         return max(15, int(os.getenv("DRIPARR_SYNC_POLL_SECONDS", "60") or "60"))
     except ValueError:
         return 60
+
+
+def env_no_download_skip_seconds():
+    try:
+        return max(15, int(os.getenv("DRIPARR_NO_DOWNLOAD_SKIP_SECONDS", "30") or "30"))
+    except ValueError:
+        return 30
 
 
 def hash_password(password, salt):
@@ -807,6 +840,31 @@ def queue_entry_is_complete(entry):
     return False
 
 
+def queue_entry_progress_text(entry):
+    if not isinstance(entry, dict):
+        return ""
+    parts = []
+    status = entry.get("status") or entry.get("trackedDownloadState") or entry.get("trackedDownloadStatus") or entry.get("downloadClientStatus")
+    if status:
+        parts.append(str(status))
+    size = entry.get("size")
+    left = entry.get("sizeleft")
+    percent = None
+    if isinstance(size, (int, float)) and size > 0 and isinstance(left, (int, float)):
+        percent = max(0, min(100, int(round((1 - (left / size)) * 100))))
+    percent_value = entry.get("percentComplete") or entry.get("progress")
+    if percent is None and isinstance(percent_value, (int, float)):
+        percent = max(0, min(100, int(round(percent_value))))
+    if queue_entry_is_complete(entry):
+        percent = 100
+    if isinstance(percent, int):
+        parts.append(f"{percent}%")
+    eta = format_eta_from_iso(entry.get("estimatedCompletionTime") or entry.get("timeleft"))
+    if eta:
+        parts.append(eta)
+    return ", ".join(parts)
+
+
 def movie_is_available_for_download(movie):
     status = str(movie.get("status") or "").strip().lower()
     if status in {"released", "available", "digital", "physical", "missing"}:
@@ -937,49 +995,56 @@ def movie_is_completed_in_radarr(config, item):
 
 
 def radarr_movie_status(config, item):
+    age_minutes = minutes_since(item.get("addedAt"))
+    skip_after_minutes = env_no_download_skip_seconds() / 60
     tmdb_id = movie_tmdb_id(config, item)
     if not tmdb_id:
         return {"state": "missing", "reason": "TMDb ID could not be resolved from IMDb."}
     movies = service_request(config["radarr"], "GET", "/movie")
     movie = find_movie_by_tmdb(movies, tmdb_id)
     if not movie:
-        return {"state": "missing", "reason": "Movie is not present in Radarr."}
+        if age_minutes is not None and age_minutes >= skip_after_minutes:
+            return {
+                "state": "skipped_no_indexer",
+                "reason": "Radarr heeft deze film na controle niet in de library staan; ik kan geen download volgen.",
+            }
+        return {"state": "missing", "reason": "Radarr ziet deze film nog niet in de library."}
     if bool(movie.get("hasFile")) or bool(movie.get("movieFile")):
-        return {"state": "completed", "reason": "Radarr reports the movie file is available."}
+        return {"state": "completed", "reason": "Radarr meldt dat het filmbestand beschikbaar is."}
 
     queue_entry = queue_entry_for_movie(radarr_queue_records(config), movie)
     if queue_entry:
         if queue_entry_is_complete(queue_entry):
-            return {"state": "active", "reason": "Download is complete in queue; waiting for Radarr import."}
-        status = queue_entry.get("status") or queue_entry.get("trackedDownloadState") or queue_entry.get("trackedDownloadStatus")
-        return {"state": "active", "reason": f"Radarr queue status: {status or 'active'}."}
+            return {"state": "active", "reason": "Radarr meldt dat de download klaar is; ik wacht op import."}
+        progress = queue_entry_progress_text(queue_entry)
+        return {"state": "active", "reason": f"Radarr heeft een actieve download in de queue{': ' + progress if progress else ''}."}
 
     history = radarr_history_records(config, movie.get("id"))
     if history_has_grab_or_import(history):
-        return {"state": "active", "reason": "Radarr grabbed a release; waiting for download/import status."}
+        return {"state": "active", "reason": "Radarr heeft een release gegrepen; ik wacht op download- of importstatus."}
     if history_has_failed_download(history):
-        return {"state": "skipped_no_indexer", "reason": "Radarr reports the download failed or was ignored."}
+        return {"state": "skipped_no_indexer", "reason": "Radarr meldt dat de download is mislukt of genegeerd."}
 
     command_state, command = movie_search_command_state(radarr_command_records(config), movie)
     if command_state == "running":
-        return {"state": "searching", "reason": "Radarr search is still running."}
+        return {"state": "searching", "reason": "Radarr is zichtbaar aan het zoeken voor deze film."}
     if command_state == "failed":
         detail = command.get("message") or command.get("errorMessage") or command.get("exception") or "Radarr search command failed."
         return {"state": "skipped_no_indexer", "reason": str(detail)}
 
     indexer_reason = radarr_health_indexer_reason(radarr_health_records(config))
     if indexer_reason:
-        return {"state": "skipped_no_indexer", "reason": f"No usable indexer in Radarr: {indexer_reason}"}
+        return {"state": "skipped_no_indexer", "reason": f"Radarr heeft geen bruikbare indexer: {indexer_reason}"}
 
-    age_minutes = minutes_since(item.get("addedAt"))
-    if movie_is_missing_and_monitored(movie) and age_minutes is not None and age_minutes >= 0.5:
+    if age_minutes is not None and age_minutes >= skip_after_minutes:
+        missing_hint = " Radarr markeert de film als ontbrekend." if movie_is_missing_and_monitored(movie) else ""
         return {
             "state": "skipped_no_indexer",
-            "reason": "Radarr marks the monitored movie as missing, with no queued download or grabbed release.",
+            "reason": f"Radarr heeft na {env_no_download_skip_seconds()} seconden geen queued download, gegrepen release of import voor deze film.{missing_hint}",
         }
     if command_state == "completed" or (age_minutes is not None and age_minutes >= 10):
-        return {"state": "skipped_no_indexer", "reason": "Radarr search finished but no release was grabbed or queued."}
-    return {"state": "searching", "reason": "Waiting for Radarr search results."}
+        return {"state": "skipped_no_indexer", "reason": "Radarr is klaar met zoeken, maar heeft geen release gegrepen of download gestart."}
+    return {"state": "searching", "reason": "Ik wacht op de zoekresultaten van Radarr."}
 
 
 def series_is_completed_in_sonarr(config, item):
@@ -1016,30 +1081,49 @@ def latest_active_item(rows):
     return latest
 
 
+def radarr_status_liveblog_message(title, status):
+    state = str((status or {}).get("state", "")).strip()
+    reason = str((status or {}).get("reason", "")).strip()
+    if state == "completed":
+        return f"Radarr bevestigt: {title} is binnen. {reason}", "completed"
+    if state == "active":
+        return f"Radarr bevestigt: {title} wordt gedownload of verwerkt. {reason}", "waiting"
+    if state == "searching":
+        return f"Radarr bevestigt: {title} wordt gecontroleerd. {reason}", "checking"
+    if state == "missing":
+        return f"Radarr bevestigt: {title} ontbreekt nog in de library. {reason}", "checking"
+    if state == "skipped_no_indexer":
+        return f"Radarr bevestigt: {title} levert geen bruikbare download op. {reason}", "skipped_no_indexer"
+    return f"Radarr-status voor {title}: {reason or 'geen extra detail gekregen.'}", "checking"
+
+
 def refresh_completed_items(config, rows):
     changed = False
     for row in active_queue_items(rows):
         if row.get("type") == "movie":
-            push_liveblog(f"Ik ben nu Radarr aan het controleren voor {row['title']}.", "checking")
+            push_liveblog(f"Ik vraag Radarr via de API om status voor {row['title']}.", "checking")
             status = radarr_movie_status(config, row)
             state = status.get("state")
             reason = str(status.get("reason", "")).strip()
+            status_message, status_mood = radarr_status_liveblog_message(row["title"], status)
             if state == "completed":
                 row["status"] = "completed"
                 row["error"] = ""
                 changed = True
-                push_liveblog(f"Radarr is klaar met {row['title']}; ik zet hem bij voltooid.", "completed")
+                push_liveblog(status_message, status_mood)
+                push_liveblog(f"Ik zet {row['title']} bij voltooid.", "completed")
                 push_event("completed", row["title"], reason or "Radarr reports the movie file is available")
             elif state == "skipped_no_indexer":
                 row["status"] = "skipped_no_indexer"
                 row["error"] = reason or "Radarr did not grab a release."
                 changed = True
-                push_liveblog(f"Ik kan voor {row['title']} geen bruikbare download vinden. Ik sla deze over en pak zo de volgende.", "skipped_no_indexer")
+                push_liveblog(status_message, status_mood)
+                push_liveblog(f"Ik sla {row['title']} over en pak zo de volgende.", "skipped_no_indexer")
                 push_event("skipped", row["title"], row["error"])
             elif reason:
                 row["error"] = reason
                 changed = True
-                push_liveblog(f"{row['title']} is nog bezig: {reason}", "waiting")
+                push_liveblog(status_message, status_mood)
             continue
         if item_is_completed(config, row):
             row["status"] = "completed"
@@ -1186,6 +1270,14 @@ def process_once(force=False):
             item["error"] = ""
             changed = True
             LAST_RUN.update({"at": item["addedAt"], "message": f"Added: {item['title']}"})
+            if item["type"] == "movie":
+                post_add_status = radarr_movie_status(config, item)
+                post_add_reason = str(post_add_status.get("reason", "")).strip()
+                if post_add_reason:
+                    item["error"] = post_add_reason
+                status_message, status_mood = radarr_status_liveblog_message(item["title"], post_add_status)
+                push_liveblog("Radarr heeft de add-opdracht geaccepteerd; ik controleer meteen of zoeken of downloaden zichtbaar is.", "checking")
+                push_liveblog(status_message, status_mood)
             next_item = next((row for row in rows if row.get("status") == "todo"), None)
             if next_item:
                 push_liveblog(f"De volgende zet ik alvast klaar in mijn hoofd: {next_item['title']}. Eerst laat ik Radarr deze afronden.", "adding")
@@ -1487,7 +1579,7 @@ def page(config, queue):
 :root {{ --bg:#090315; --panel:#141026; --line:#3b2d70; --text:#f1ecff; --muted:#9f92c9; --accent:#8a5fff; --green:#2fdd8f; --yellow:#ffbe3d; --red:#ff6f8f; }}
 * {{ box-sizing:border-box; }} body {{ margin:0; font-family:'Space Grotesk',sans-serif; color:var(--text); background:radial-gradient(circle at 35% 0,#1a1041 0,#09031d 50%,#060214 100%); letter-spacing:.1px; }}
 .app {{ display:grid; grid-template-columns:260px 1fr; min-height:100vh; }} aside {{ background:linear-gradient(180deg,#2f135f,#1f0e45); border-right:1px solid #50358a; padding:14px 10px; }}
-.brand {{ display:flex; align-items:center; gap:10px; padding:8px 10px 16px; font-size:28px; font-weight:800; }} .logo-img {{ width:36px; height:36px; border-radius:9px; object-fit:contain; padding:3px; border:1px solid #6c54b7; background:#200f42; }}
+.brand {{ padding:8px 10px 16px; }} .brand-main {{ display:flex; align-items:center; gap:10px; font-size:28px; font-weight:800; }} .brand-version {{ margin:5px 0 0 46px; color:#bcaef1; font-size:12px; font-weight:700; letter-spacing:0; }} .logo-img {{ width:36px; height:36px; border-radius:9px; object-fit:contain; padding:3px; border:1px solid #6c54b7; background:#200f42; }}
 nav button {{ width:100%; border:0; text-align:left; color:#d8cfff; background:transparent; border-radius:10px; padding:12px 12px; font-weight:700; cursor:pointer; margin:4px 0; display:flex; align-items:center; gap:9px; transition:background .22s ease, box-shadow .22s ease, color .22s ease; }}
 nav button.active, nav button:hover {{ background:linear-gradient(90deg,#5125a3,#3e1c86); color:white; box-shadow:0 8px 24px rgba(74,36,148,.35); }} .nav-icon {{ width:18px; height:18px; stroke:currentColor; fill:none; stroke-width:1.8; }}
 main {{ padding:26px; max-width:1320px; width:100%; margin:0 auto; }} h1 {{ margin:0 0 8px; font-size:38px; color:#f8f5ff; line-height:1.08; }} h1 span {{ color:var(--accent); }} .sub {{ color:var(--muted); margin:0 0 18px; line-height:1.45; }}
@@ -1626,7 +1718,9 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 @media (max-width:980px) {{
   .app {{ grid-template-columns:1fr; }}
   aside {{ position:sticky; top:0; z-index:20; padding:10px; backdrop-filter: blur(8px); }}
-  .brand {{ font-size:24px; padding:4px 8px 10px; }}
+  .brand {{ padding:4px 8px 10px; }}
+  .brand-main {{ font-size:24px; }}
+  .brand-version {{ margin-left:42px; }}
   nav {{ display:flex; gap:8px; overflow:auto; padding-bottom:4px; }}
   nav button {{ min-width:max-content; padding:10px 12px; margin:0; }}
   nav button .connected-pill {{ display:none; }}
@@ -1647,7 +1741,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
   .worker-toggle-wrap {{ width:100%; justify-content:space-between; }}
 }}
 </style></head>
-<body><div class=\"app\"><aside><div class=\"brand\"><img class=\"logo-img\" src=\"/assets/rabbit.svg\" alt=\"Driparr\">Driparr</div><nav>
+<body><div class=\"app\"><aside><div class=\"brand\"><div class=\"brand-main\"><img class=\"logo-img\" src=\"/assets/rabbit.svg\" alt=\"Driparr\">Driparr</div><div class=\"brand-version\">v{html.escape(APP_VERSION)}</div></div><nav>
 <button class=\"active\" data-tab=\"dashboard\"><svg class=\"nav-icon\" viewBox=\"0 0 24 24\"><path d=\"M3 13h8V3H3v10zm10 8h8V3h-8v18zM3 21h8v-6H3v6z\"/></svg>Dashboard</button>
 <button data-tab=\"lists\"><svg class=\"nav-icon\" viewBox=\"0 0 24 24\"><path d=\"M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01\"/></svg>Lists</button>
 <button data-tab=\"queue\"><svg class=\"nav-icon\" viewBox=\"0 0 24 24\"><path d=\"M4 7h16M4 12h16M4 17h10\"/></svg>Queue</button>
