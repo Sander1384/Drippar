@@ -22,6 +22,8 @@ ASSETS = ROOT / "assets"
 CONFIG_PATH = DATA / "config.json"
 QUEUE_PATH = DATA / "queue.csv"
 QUEUE_FIELDS = ["type", "externalId", "title", "status", "source", "addedAt", "error"]
+ACTIVE_STATUSES = {"active", "added"}
+SKIPPED_STATUSES = {"skipped", "skipped_no_indexer"}
 LOCK = threading.Lock()
 LAST_RUN = {"at": None, "message": "Worker has not started yet."}
 LAST_EVENTS = []
@@ -33,6 +35,28 @@ MAX_CSV_CHARS = 2 * 1024 * 1024
 
 def utc_now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def parse_iso_datetime(value):
+    if not value:
+        return None
+    try:
+        text = str(value).strip()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    except ValueError:
+        return None
+
+
+def minutes_since(value):
+    parsed = parse_iso_datetime(value)
+    if not parsed:
+        return None
+    return (datetime.now(timezone.utc) - parsed).total_seconds() / 60
 
 
 def push_event(level, title, detail=""):
@@ -219,10 +243,10 @@ def queue_stats_for_source(rows, source_name):
     scoped = [r for r in rows if str(r.get("source", "")).strip() == src]
     total = len(scoped)
     todo = len([r for r in scoped if r.get("status") == "todo"])
-    active = len([r for r in scoped if r.get("status") in ("active", "added")])
+    active = len([r for r in scoped if r.get("status") in ACTIVE_STATUSES])
     completed = len([r for r in scoped if r.get("status") == "completed"])
     added = len([r for r in scoped if r.get("status") in ("active", "added", "completed")])
-    skipped = len([r for r in scoped if r.get("status") == "skipped"])
+    skipped = len([r for r in scoped if r.get("status") in SKIPPED_STATUSES])
     failed = len([r for r in scoped if r.get("status") == "failed"])
     return {"total": total, "todo": todo, "active": active, "completed": completed, "added": added, "skipped": skipped, "failed": failed}
 
@@ -632,6 +656,35 @@ def radarr_queue_records(config):
     return response_records(payload)
 
 
+def radarr_history_records(config, movie_id):
+    paths = [
+        f"/history/movie?movieId={int(movie_id)}&pageSize=100",
+        f"/history?movieId={int(movie_id)}&pageSize=100",
+    ]
+    for path in paths:
+        try:
+            return response_records(service_request(config["radarr"], "GET", path))
+        except RuntimeError:
+            continue
+    return []
+
+
+def radarr_command_records(config):
+    try:
+        payload = service_request(config["radarr"], "GET", "/command")
+    except RuntimeError:
+        return []
+    return response_records(payload)
+
+
+def radarr_health_records(config):
+    try:
+        payload = service_request(config["radarr"], "GET", "/health")
+    except RuntimeError:
+        return []
+    return payload if isinstance(payload, list) else []
+
+
 def movie_tmdb_id(config, item):
     kind, value = item["externalId"].split(":", 1)
     return value if kind == "tmdb" else resolve_tmdb_from_imdb(config, value)
@@ -686,6 +739,93 @@ def queue_entry_is_complete(entry):
     return False
 
 
+def text_contains_any(value, words):
+    text = json.dumps(value, default=str).lower() if isinstance(value, (dict, list)) else str(value or "").lower()
+    return any(word in text for word in words)
+
+
+def history_has_grab_or_import(records):
+    for record in records or []:
+        event_type = str(record.get("eventType", "")).strip().lower()
+        if event_type in {"grabbed", "downloadfolderimported", "moviefileimported"}:
+            return True
+    return False
+
+
+def history_has_failed_download(records):
+    for record in records or []:
+        event_type = str(record.get("eventType", "")).strip().lower()
+        if event_type in {"downloadfailed", "downloadignored"}:
+            return True
+    return False
+
+
+def command_matches_movie(command, movie):
+    if not isinstance(command, dict) or not isinstance(movie, dict):
+        return False
+    movie_id = movie.get("id")
+    if movie_id is None:
+        return False
+    body = command.get("body") if isinstance(command.get("body"), dict) else {}
+    candidate_values = [
+        command.get("movieId"),
+        body.get("movieId"),
+    ]
+    for value in candidate_values:
+        try:
+            if int(value) == int(movie_id):
+                return True
+        except (TypeError, ValueError):
+            pass
+    for key in ("movieIds", "movies"):
+        values = body.get(key) or command.get(key)
+        if not isinstance(values, list):
+            continue
+        for value in values:
+            if isinstance(value, dict):
+                value = value.get("id") or value.get("movieId")
+            try:
+                if int(value) == int(movie_id):
+                    return True
+            except (TypeError, ValueError):
+                continue
+    title = str(movie.get("title") or "").strip().lower()
+    if title and title in json.dumps(command, default=str).lower():
+        return True
+    return False
+
+
+def movie_search_command_state(commands, movie):
+    matched = []
+    for command in commands or []:
+        name = str(command.get("name") or command.get("commandName") or "").lower()
+        if "search" not in name or not command_matches_movie(command, movie):
+            continue
+        matched.append(command)
+    if not matched:
+        return "unknown", None
+    running_states = {"queued", "started", "running", "pending"}
+    failed_states = {"failed", "aborted", "cancelled", "canceled"}
+    for command in matched:
+        status = str(command.get("status") or command.get("state") or "").strip().lower()
+        if status in running_states:
+            return "running", command
+    for command in matched:
+        status = str(command.get("status") or command.get("state") or "").strip().lower()
+        if status in failed_states:
+            return "failed", command
+    return "completed", matched[0]
+
+
+def radarr_health_indexer_reason(health):
+    for item in health or []:
+        if not text_contains_any(item, ("indexer",)):
+            continue
+        if text_contains_any(item, ("no indexer", "indexers are unavailable", "all indexers", "disabled", "unavailable", "fail")):
+            return item.get("message") or item.get("wikiUrl") or "Radarr reports an indexer problem."
+    return ""
+
+
 def sonarr_has_tvdb(config, tvdb_id):
     series = service_request(config["sonarr"], "GET", "/series")
     for item in series or []:
@@ -703,6 +843,47 @@ def movie_is_completed_in_radarr(config, item):
     if not movie:
         return False
     return bool(movie.get("hasFile")) or bool(movie.get("movieFile"))
+
+
+def radarr_movie_status(config, item):
+    tmdb_id = movie_tmdb_id(config, item)
+    if not tmdb_id:
+        return {"state": "missing", "reason": "TMDb ID could not be resolved from IMDb."}
+    movies = service_request(config["radarr"], "GET", "/movie")
+    movie = find_movie_by_tmdb(movies, tmdb_id)
+    if not movie:
+        return {"state": "missing", "reason": "Movie is not present in Radarr."}
+    if bool(movie.get("hasFile")) or bool(movie.get("movieFile")):
+        return {"state": "completed", "reason": "Radarr reports the movie file is available."}
+
+    queue_entry = queue_entry_for_movie(radarr_queue_records(config), movie)
+    if queue_entry:
+        if queue_entry_is_complete(queue_entry):
+            return {"state": "active", "reason": "Download is complete in queue; waiting for Radarr import."}
+        status = queue_entry.get("status") or queue_entry.get("trackedDownloadState") or queue_entry.get("trackedDownloadStatus")
+        return {"state": "active", "reason": f"Radarr queue status: {status or 'active'}."}
+
+    history = radarr_history_records(config, movie.get("id"))
+    if history_has_grab_or_import(history):
+        return {"state": "active", "reason": "Radarr grabbed a release; waiting for download/import status."}
+    if history_has_failed_download(history):
+        return {"state": "skipped_no_indexer", "reason": "Radarr reports the download failed or was ignored."}
+
+    command_state, command = movie_search_command_state(radarr_command_records(config), movie)
+    if command_state == "running":
+        return {"state": "searching", "reason": "Radarr search is still running."}
+    if command_state == "failed":
+        detail = command.get("message") or command.get("errorMessage") or command.get("exception") or "Radarr search command failed."
+        return {"state": "skipped_no_indexer", "reason": str(detail)}
+
+    indexer_reason = radarr_health_indexer_reason(radarr_health_records(config))
+    if indexer_reason:
+        return {"state": "skipped_no_indexer", "reason": f"No usable indexer in Radarr: {indexer_reason}"}
+
+    age_minutes = minutes_since(item.get("addedAt"))
+    if command_state == "completed" or (age_minutes is not None and age_minutes >= 10):
+        return {"state": "skipped_no_indexer", "reason": "Radarr search finished but no release was grabbed or queued."}
+    return {"state": "searching", "reason": "Waiting for Radarr search results."}
 
 
 def series_is_completed_in_sonarr(config, item):
@@ -728,7 +909,7 @@ def item_is_completed(config, item):
 
 
 def active_queue_items(rows):
-    return [row for row in rows if row.get("status") in ("active", "added")]
+    return [row for row in rows if row.get("status") in ACTIVE_STATUSES]
 
 
 def latest_active_item(rows):
@@ -742,6 +923,24 @@ def latest_active_item(rows):
 def refresh_completed_items(config, rows):
     changed = False
     for row in active_queue_items(rows):
+        if row.get("type") == "movie":
+            status = radarr_movie_status(config, row)
+            state = status.get("state")
+            reason = str(status.get("reason", "")).strip()
+            if state == "completed":
+                row["status"] = "completed"
+                row["error"] = ""
+                changed = True
+                push_event("completed", row["title"], reason or "Radarr reports the movie file is available")
+            elif state == "skipped_no_indexer":
+                row["status"] = "skipped_no_indexer"
+                row["error"] = reason or "Radarr did not grab a release."
+                changed = True
+                push_event("skipped", row["title"], row["error"])
+            elif reason:
+                row["error"] = reason
+                changed = True
+            continue
         if item_is_completed(config, row):
             row["status"] = "completed"
             row["error"] = ""
@@ -823,7 +1022,7 @@ def process_once(force=False):
         LAST_RUN.update(
             {
                 "at": utc_now(),
-                "message": f"Sync mode: waiting for Radarr to finish {active_item['title']}.",
+                "message": f"Sync mode: waiting for Radarr to finish {active_item['title']}. {active_item.get('error', '')}".strip(),
             }
         )
         if changed:
@@ -1017,8 +1216,10 @@ def page(config, queue):
             return "In queue for next drip"
         if status == "skipped":
             return "Already in library"
+        if status == "skipped_no_indexer":
+            return str(row.get("error", "")).strip() or "Skipped because Radarr did not grab a release"
         if status in ("active", "added"):
-            return "Added to Radarr; waiting until Radarr reports a movie file"
+            return str(row.get("error", "")).strip() or "Added to Radarr; waiting until Radarr reports a movie file"
         if status == "completed":
             return "Radarr reports the movie file is available"
         reason = str(row.get("error", "")).strip()
@@ -1059,9 +1260,11 @@ def page(config, queue):
     step3_done = config.get("app", {}).get("dripMode") in ("timed", "sync")
     step4_done = worker_enabled
     todo = [r for r in queue if r.get("status") == "todo"]
-    active = [r for r in queue if r.get("status") in ("active", "added")]
+    active = [r for r in queue if r.get("status") in ACTIVE_STATUSES]
     completed = [r for r in queue if r.get("status") == "completed"]
-    skipped = [r for r in queue if r.get("status") == "skipped"]
+    duplicate_skipped = [r for r in queue if r.get("status") == "skipped"]
+    no_indexer_skipped = [r for r in queue if r.get("status") == "skipped_no_indexer"]
+    skipped = duplicate_skipped + no_indexer_skipped
     failed = [r for r in queue if r.get("status") == "failed"]
     todo_positions = {}
     pos_counter = 1
@@ -1125,8 +1328,12 @@ def page(config, queue):
     )
     skipped_rows = "\n".join(
         f"<li><span>{html.escape(r['title'])}</span><small><img src='/assets/check.svg' alt='In library' style='width:14px;height:14px;display:block;filter:invert(72%) sepia(28%) saturate(889%) hue-rotate(89deg) brightness(95%) contrast(92%);'></small></li>"
-        for r in skipped[:12]
+        for r in duplicate_skipped[:12]
     ) or "<li><span>No existing movies detected</span><small><img src='/assets/check.svg' alt='Done' style='width:14px;height:14px;display:block;filter:invert(72%) sepia(28%) saturate(889%) hue-rotate(89deg) brightness(95%) contrast(92%);'></small></li>"
+    no_indexer_rows = "\n".join(
+        f"<li><span>{html.escape(r['title'])}</span><small>{html.escape(str(r.get('error','')).strip() or 'No release grabbed')}</small></li>"
+        for r in no_indexer_skipped[:12]
+    ) or "<li><span>No Radarr search skips</span><small></small></li>"
     progress_by_source = {}
     for row in queue:
         source = str(row.get("source", "")).strip()
@@ -1136,7 +1343,7 @@ def page(config, queue):
         bucket["total"] += 1
         if row.get("status") == "todo":
             bucket["todo"] += 1
-        elif row.get("status") in ("active", "added"):
+        elif row.get("status") in ACTIVE_STATUSES:
             bucket["active"] += 1
         else:
             bucket["done"] += 1
@@ -1175,7 +1382,7 @@ input:focus,select:focus {{ outline:none; border-color:#8661eb; box-shadow:0 0 0
 .file-chip {{ flex:1; min-width:220px; border:1px dashed #4d3a86; background:#120b26; border-radius:10px; padding:10px 12px; color:#bdb1e3; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
 .file-chip.has-file {{ border-style:solid; border-color:#6e54c5; color:#e9e1ff; background:#1a1330; }}
 table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-bottom:1px solid #312453; text-align:left; }} th {{ color:#a79ac9; font-size:12px; text-transform:uppercase; letter-spacing:.35px; }}
-.pill {{ display:inline-block; border-radius:7px; padding:3px 8px; font-size:12px; font-weight:700; }} .pill.todo {{ background:#392c11; color:var(--yellow); }} .pill.active,.pill.added {{ background:#102f45; color:#7ed7ff; }} .pill.completed {{ background:#123425; color:var(--green); }} .pill.failed {{ background:#3a1320; color:var(--red); }} .pill.skipped {{ background:#2d2742; color:#cbb9ff; }}
+.pill {{ display:inline-block; border-radius:7px; padding:3px 8px; font-size:12px; font-weight:700; }} .pill.todo {{ background:#392c11; color:var(--yellow); }} .pill.active,.pill.added {{ background:#102f45; color:#7ed7ff; }} .pill.completed {{ background:#123425; color:var(--green); }} .pill.failed {{ background:#3a1320; color:var(--red); }} .pill.skipped {{ background:#2d2742; color:#cbb9ff; }} .pill.skipped_no_indexer {{ background:#3f2d11; color:#ffbe3d; }}
 .feed-list {{ background:#100a20; border:1px solid #2f2450; border-radius:12px; padding:12px; }}
 .feed-list h3 {{ margin:2px 0 10px; font-size:16px; }} .feed-list ul {{ list-style:none; margin:0; padding:0; max-height:270px; overflow:auto; }} .feed-list li {{ display:flex; justify-content:space-between; gap:10px; padding:7px 6px; border-bottom:1px solid #2a1f44; }}
 .feed-list li span {{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }} .feed-list li small {{ color:#a49ac2; font-size:12px; }}
@@ -1352,6 +1559,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 <div class=\"dashboard-grid\">
 <div class=\"panel\"><h3 style=\"margin-top:0\">Recent Events</h3><p class=\"sub\">What Driparr has done recently.</p><div class=\"feed-list\"><ul>{event_rows}</ul></div></div>
 <div class=\"panel\"><h3 style=\"margin-top:0\" data-i18n=\"already_library\">Already in Library</h3><p class=\"sub\" data-i18n=\"already_library_sub\">Automatically skipped to prevent duplicates.</p><div class=\"feed-list\"><ul>{skipped_rows}</ul></div></div>
+<div class=\"panel\"><h3 style=\"margin-top:0\">Skipped: No Release</h3><p class=\"sub\">Radarr searched but did not grab a release, or reported no usable indexer.</p><div class=\"feed-list\"><ul>{no_indexer_rows}</ul></div></div>
 </div>
 </section>
 <section id=\"lists\" class=\"tab\"><h1>Lists</h1><p class=\"sub\">Import an IMDb CSV file.</p><div class=\"panel\"><div class=\"grid\"><div><label>Name *</label><input id=\"listName\" placeholder=\"My list\" required><div id=\"listNameError\" class=\"field-error\"></div></div><div><label>Media</label><select id=\"listMedia\"><option value=\"movie\">Movies</option><option value=\"series\">Series</option></select></div></div><h3 style=\"margin-top:12px\">IMDb CSV Import</h3><p class=\"sub\">Choose your IMDb export CSV and upload it directly.</p><div class=\"actions\" style=\"align-items:center;gap:10px\"><input id=\"imdbCsvFile\" class=\"file-input-hidden\" type=\"file\" accept=\".csv,text/csv\" onchange=\"onImdbCsvSelected(this)\"><div class=\"file-picker\"><label for=\"imdbCsvFile\" class=\"file-trigger\">Choose file</label><div id=\"imdbCsvFileMeta\" class=\"file-chip\">No file selected</div></div><button id=\"imdbCsvUploadBtn\" class=\"btn secondary\" onclick=\"importImdbCsvFile()\">Upload CSV</button></div><div id=\"imdbCsvProgressWrap\" style=\"display:none;margin-top:10px\"><div style=\"height:10px;background:#2c2449;border:1px solid #4d3a86;border-radius:999px;overflow:hidden\"><div id=\"imdbCsvProgressBar\" style=\"height:100%;width:0%;background:linear-gradient(90deg,#8f62ff,#6635e8)\"></div></div><div id=\"imdbCsvProgressText\" class=\"sub\" style=\"margin-top:6px\">0%</div></div></div><div class=\"panel\"><h3 style=\"margin-top:0\">Saved lists</h3><div class=\"queue-wrap\"><table><thead><tr><th>#</th><th>Name</th><th>Type</th><th>Media</th><th>Source</th><th>Status</th><th>Action</th></tr></thead><tbody>{list_rows}</tbody></table></div></div><div class=\"panel\"><h3 style=\"margin-top:0\">Run history</h3><div class=\"queue-wrap\"><table><thead><tr><th>Time</th><th>List</th><th>Progress</th><th>Status</th><th>A/S/F</th></tr></thead><tbody>{run_history_rows}</tbody></table></div></div></section>
