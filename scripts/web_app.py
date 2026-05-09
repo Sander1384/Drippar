@@ -367,7 +367,6 @@ def default_config():
             "notifyEnabled": False,
             "notifyWebhookUrl": "",
             "runHistory": [],
-            "respectExternalRadarrQueue": True,
             "adminUsername": "",
             "adminPasswordHash": "",
             "adminPasswordSalt": "",
@@ -415,8 +414,6 @@ def read_config():
         app_cfg["notifyWebhookUrl"] = ""
     if "runHistory" not in app_cfg or not isinstance(app_cfg.get("runHistory"), list):
         app_cfg["runHistory"] = []
-    if "respectExternalRadarrQueue" not in app_cfg:
-        app_cfg["respectExternalRadarrQueue"] = True
     if "adminUsername" not in app_cfg:
         app_cfg["adminUsername"] = ""
     if "adminPasswordHash" not in app_cfg:
@@ -1031,48 +1028,6 @@ def queue_entry_title(entry):
     return str(entry.get("title") or entry.get("downloadTitle") or entry.get("sourceTitle") or "een externe Radarr-download").strip()
 
 
-def active_radarr_movie_ids_for_rows(config, rows):
-    ids = set()
-    active_movies = [row for row in active_queue_items(rows) if row.get("type") == "movie"]
-    if not active_movies:
-        return ids
-    try:
-        movies = service_request(config["radarr"], "GET", "/movie")
-    except RuntimeError:
-        return ids
-    for row in active_movies:
-        try:
-            movie = find_movie_by_tmdb(movies, movie_tmdb_id(config, row))
-        except RuntimeError:
-            continue
-        if movie and movie.get("id") is not None:
-            try:
-                ids.add(int(movie.get("id")))
-            except (TypeError, ValueError):
-                continue
-    return ids
-
-
-def external_radarr_queue_entry(config, rows):
-    if not bool(config.get("app", {}).get("respectExternalRadarrQueue", True)):
-        return None
-    own_movie_ids = active_radarr_movie_ids_for_rows(config, rows)
-    for entry in radarr_queue_records(config):
-        if not isinstance(entry, dict) or queue_entry_problem_reason(entry) or queue_entry_is_complete(entry):
-            continue
-        movie_id = entry.get("movieId")
-        nested = entry.get("movie")
-        if movie_id is None and isinstance(nested, dict):
-            movie_id = nested.get("id")
-        try:
-            if movie_id is not None and int(movie_id) in own_movie_ids:
-                continue
-        except (TypeError, ValueError):
-            pass
-        return entry
-    return None
-
-
 def movie_is_available_for_download(movie):
     status = str(movie.get("status") or "").strip().lower()
     if status in {"released", "available", "digital", "physical", "missing"}:
@@ -1553,26 +1508,6 @@ def process_once(force=False):
                 "message": f"Sync mode: waiting for Radarr to finish {active_item['title']}. {active_item.get('error', '')}".strip(),
             }
         )
-        if changed:
-            write_queue(rows)
-            if refresh_run_history(config, rows):
-                save_config(config)
-        return
-
-    try:
-        external_entry = external_radarr_queue_entry(config, rows)
-    except RuntimeError as error:
-        external_entry = None
-        push_liveblog(f"Ik kon de Radarr-queue niet controleren op externe downloads: {error}", "failed")
-    if external_entry:
-        detail = queue_entry_progress_text(external_entry)
-        title = queue_entry_title(external_entry)
-        message = f"Ik wacht met nieuwe Driparr-items, want Radarr heeft al een externe download lopen: {title}"
-        if detail:
-            message = f"{message} ({detail})"
-        push_liveblog(message + ".", "waiting")
-        push_liveblog(next_check_text(config), "waiting")
-        LAST_RUN.update({"at": utc_now(), "message": f"Waiting for external Radarr download: {title}"})
         if changed:
             write_queue(rows)
             if refresh_run_history(config, rows):
@@ -2215,8 +2150,6 @@ function translateRuntimeText(value) {{
     [/Ik sla (.+?) over en pak zo de volgende\\./g, 'Ich überspringe $1 und nehme gleich den nächsten Eintrag.'],
     [/Ik word wakker en kijk wat er in mijn wachtrij staat\\./g, 'Ich wache auf und prüfe meine Queue.'],
     [/Ik wacht nog even met de volgende film, want (.+?) is nog niet klaar volgens Radarr\\./g, 'Ich warte mit dem nächsten Film, weil $1 laut Radarr noch nicht fertig ist.'],
-    [/Ik kon de Radarr-queue niet controleren op externe downloads: (.+)/g, 'Ich konnte die Radarr-Queue nicht auf externe Downloads prüfen: $1'],
-    [/Ik wacht met nieuwe Driparr-items, want Radarr heeft al een externe download lopen: (.+?)\\./g, 'Ich warte mit neuen Driparr-Einträgen, weil Radarr bereits einen externen Download ausführt: $1.'],
     [/Ik heb nu geen nieuwe films klaarstaan\\. Ik blijf rustig wachten\\./g, 'Ich habe gerade keine neuen Filme bereit. Ich warte ruhig weiter.'],
     [/Radarr geeft een fout terug tijdens mijn controle: (.+)/g, 'Radarr gibt bei meiner Prüfung einen Fehler zurück: $1'],
     [/Radarr is oké, ik ga (.+?) klaarzetten om te downloaden\\./g, 'Radarr ist in Ordnung; ich bereite $1 zum Herunterladen vor.'],
@@ -2284,8 +2217,6 @@ function translateRuntimeText(value) {{
     [/Ik sla (.+?) over en pak zo de volgende\\./g, 'I am skipping $1 and will pick up the next item shortly.'],
     [/Ik word wakker en kijk wat er in mijn wachtrij staat\\./g, 'I am waking up and checking my queue.'],
     [/Ik wacht nog even met de volgende film, want (.+?) is nog niet klaar volgens Radarr\\./g, 'I am waiting before adding the next movie because Radarr says $1 is not done yet.'],
-    [/Ik kon de Radarr-queue niet controleren op externe downloads: (.+)/g, 'I could not check the Radarr queue for external downloads: $1'],
-    [/Ik wacht met nieuwe Driparr-items, want Radarr heeft al een externe download lopen: (.+?)\\./g, 'I am waiting before adding new Driparr items because Radarr already has an external download running: $1.'],
     [/Ik heb nu geen nieuwe films klaarstaan\\. Ik blijf rustig wachten\\./g, 'I have no new movies ready right now. I will keep waiting.'],
     [/Radarr geeft een fout terug tijdens mijn controle: (.+)/g, 'Radarr returned an error during my check: $1'],
     [/Radarr is oké, ik ga (.+?) klaarzetten om te downloaden\\./g, 'Radarr is OK; I am preparing $1 for download.'],
