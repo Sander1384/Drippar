@@ -19,7 +19,7 @@
 
 Driparr is a small self-hosted web app for people who keep large IMDb watchlists and want Radarr to add movies gradually instead of all at once.
 
-Import an IMDb CSV, review the queue, choose how quickly items should drip into Radarr, and let Driparr handle the pacing. It can also skip movies that Radarr already knows about and, in sync mode, wait for its own active Driparr item to finish before adding the next item.
+Import an IMDb CSV, review the queue, choose how quickly items should drip into Radarr, and let Driparr handle the pacing. It can also skip movies that Radarr already knows about and, in sync mode, wait for its own active Driparr item to finish before adding the next item. The liveblog explains what Radarr is reporting, with varied status updates in Dutch, English, and German.
 
 > [!IMPORTANT]
 > Driparr is intentionally focused on IMDb CSV to Radarr. It is built for predictable, visible drip-feeding rather than broad list-sync automation.
@@ -55,6 +55,7 @@ Import an IMDb CSV, review the queue, choose how quickly items should drip into 
 - Radarr connection test from the web UI.
 - Quality profile and root folder selection.
 - Queue overview with readable status and reasons.
+- Livelier liveblog with varied Radarr status messages and translated runtime text.
 - Duplicate protection for existing Radarr movies.
 - Timed drip mode with configurable interval and batch size.
 - Sync drip mode that waits for Driparr's own active item to complete.
@@ -86,7 +87,7 @@ Create `docker-compose.yml`:
 ```yaml
 services:
   driparr:
-    image: ghcr.io/sander1384/driparr:v0.1.14
+    image: ghcr.io/sander1384/driparr:v0.1.15
     container_name: driparr
     restart: unless-stopped
     ports:

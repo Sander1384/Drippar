@@ -30,11 +30,12 @@ LAST_RUN = {"at": None, "message": "Worker has not started yet."}
 LAST_EVENTS = []
 LIVEBLOG = []
 AMBIENT_INDEX = 0
+LAST_AMBIENT_AT = None
 SESSIONS = {}
 SESSION_TTL_SECONDS = 60 * 60 * 12
 MAX_REQUEST_BYTES = 2 * 1024 * 1024
 MAX_CSV_CHARS = 2 * 1024 * 1024
-APP_VERSION_FALLBACK = "0.1.14"
+APP_VERSION_FALLBACK = "0.1.15"
 
 
 def detect_app_version():
@@ -100,7 +101,7 @@ def next_check_text(config):
         seconds = max(1, int(config.get("app", {}).get("intervalMinutes", 60))) * 60
     minutes = max(1, int(round(seconds / 60)))
     unit = "minuut" if minutes == 1 else "minuten"
-    return f"Ik ga over ongeveer {minutes} {unit} opnieuw kijken, rond {future_time_text(seconds)}."
+    return f"Volgende controle over ongeveer {minutes} {unit}, rond {future_time_text(seconds)}."
 
 
 def pluralize(count, singular, plural=None):
@@ -129,26 +130,26 @@ AMBIENT_LIVEBLOG_LINES = [
     ("De volgende stap krijgt alvast een strenge blik. Vriendelijk streng.", "waiting"),
     ("Alles staat nog onder controle. Even knipperen en zo weer verder.", "idle"),
     ("Incomplete downloads horen eerst af te maken. Daar is een duidelijke mening over.", "waiting"),
-    ("Ik tel geen schaapjes, ik tel queue-items. Veel nuttiger.", "idle"),
+    ("Schaapjes tellen? Liever queue-items. Veel nuttiger.", "idle"),
     ("Radarr krijgt zo weer een keurige statusvraag. Met nette schoenen aan.", "checking"),
-    ("Ik houd de importdeur op een kier en kijk of er iets binnenkomt.", "waiting"),
-    ("Geen paniek in de downloadstraat. Ik kijk gewoon nog een keer.", "checking"),
+    ("De importdeur staat op een kier; binnenkomende films worden gezien.", "waiting"),
+    ("Geen paniek in de downloadstraat. Gewoon nog een nette controle.", "checking"),
     ("De wachtrij staat recht, de koffie is denkbeeldig, de aandacht is echt.", "thinking"),
-    ("Ik luister naar Radarr alsof het een spannend hoorspel is.", "checking"),
+    ("Radarr klinkt vandaag als een spannend hoorspel.", "checking"),
     ("Er wordt niets geforceerd. Alleen vriendelijk doch beslist gecontroleerd.", "waiting"),
-    ("Ik heb de volgende film al in het vizier, maar eerst deze netjes afronden.", "waiting"),
+    ("De volgende film staat al in beeld, maar eerst deze netjes afronden.", "waiting"),
     ("Statuscontrole onderweg. Klein knikje naar de API.", "checking"),
     ("Alles rustig. Dat is soms precies wat je wilt zien.", "idle"),
-    ("Ik poets de voortgangsbalk nog even op in mijn hoofd.", "thinking"),
+    ("De voortgangsbalk krijgt in gedachten nog even een poetsbeurt.", "thinking"),
     ("Als Radarr iets nieuws fluistert, zet ik het hier meteen neer.", "idle"),
-    ("Ik blijf bij de deur staan tot de download zich meldt.", "waiting"),
+    ("De deur blijft bewaakt tot de download zich meldt.", "waiting"),
     ("Even de lijst rechttrekken. Niemand raakt hier zoek.", "checking"),
     ("Rustig tempo, scherpe blik. Zo hoort een drip te lopen.", "thinking"),
-    ("Ik controleer zo weer of rood echt rood is, en niet stiekem bijna groen.", "checking"),
+    ("Straks nog een blik: rood moet echt rood zijn, niet stiekem bijna groen.", "checking"),
     ("De queue krijgt geen haast, wel aandacht.", "idle"),
-    ("Ik wacht op bewijs, niet op hoop. Radarr mag het zeggen.", "waiting"),
+    ("Bewijs boven hoop. Radarr mag het zeggen.", "waiting"),
     ("Kleine ronde langs de statuslampjes. Alles krijgt een blik.", "checking"),
-    ("Ik hou het netjes: eerst weten, dan doen.", "thinking"),
+    ("Netjes werken blijft het plan: eerst weten, dan doen.", "thinking"),
 ]
 
 
@@ -241,12 +242,13 @@ def push_liveblog(message, mood="thinking"):
 
 
 def maybe_push_ambient_liveblog():
-    global AMBIENT_INDEX
-    last_at = LIVEBLOG[0].get("at") if LIVEBLOG else None
-    if last_at and (minutes_since(last_at) or 0) < 2:
+    global AMBIENT_INDEX, LAST_AMBIENT_AT
+    last_ambient_age = minutes_since(LAST_AMBIENT_AT)
+    if last_ambient_age is not None and last_ambient_age < 3:
         return
     message, mood = AMBIENT_LIVEBLOG_LINES[AMBIENT_INDEX % len(AMBIENT_LIVEBLOG_LINES)]
     AMBIENT_INDEX += 1
+    LAST_AMBIENT_AT = utc_now()
     push_liveblog(message, mood)
 
 
@@ -1213,7 +1215,7 @@ def radarr_movie_status(config, item):
         }
     if command_state == "completed" or (age_minutes is not None and age_minutes >= 10):
         return {"state": "skipped_no_indexer", "reason": "Radarr is klaar met zoeken, maar heeft geen release gegrepen of download gestart."}
-    return {"state": "searching", "reason": "Ik wacht op de zoekresultaten van Radarr."}
+    return {"state": "searching", "reason": "Radarr zoekt nog naar bruikbare resultaten."}
 
 
 def series_is_completed_in_sonarr(config, item):
@@ -1270,7 +1272,7 @@ def refresh_completed_items(config, rows):
     changed = False
     for row in active_queue_items(rows):
         if row.get("type") == "movie":
-            push_liveblog(f"Ik vraag Radarr via de API om status voor {row['title']}.", "checking")
+            push_liveblog(f"Statusvraag naar Radarr voor {row['title']}.", "checking")
             status = radarr_movie_status(config, row)
             state = status.get("state")
             reason = str(status.get("reason", "")).strip()
@@ -1280,14 +1282,14 @@ def refresh_completed_items(config, rows):
                 row["error"] = ""
                 changed = True
                 push_liveblog(status_message, status_mood)
-                push_liveblog(f"Ik zet {row['title']} bij voltooid.", "completed")
+                push_liveblog(f"{row['title']} gaat naar voltooid.", "completed")
                 push_event("completed", row["title"], reason or "Radarr reports the movie file is available")
             elif state == "skipped_no_indexer":
                 row["status"] = "skipped_no_indexer"
                 row["error"] = reason or "Radarr did not grab a release."
                 changed = True
                 push_liveblog(status_message, status_mood)
-                push_liveblog(f"Ik sla {row['title']} over en pak zo de volgende.", "skipped_no_indexer")
+                push_liveblog(f"{row['title']} wordt overgeslagen; de volgende komt zo aan de beurt.", "skipped_no_indexer")
                 push_event("skipped", row["title"], row["error"])
             elif reason:
                 row["error"] = reason
@@ -1298,7 +1300,7 @@ def refresh_completed_items(config, rows):
             row["status"] = "completed"
             row["error"] = ""
             changed = True
-            push_liveblog(f"{row['title']} is klaar. Ik ruim mijn wachtrij bij.", "completed")
+            push_liveblog(f"{row['title']} is klaar. De wachtrij wordt bijgewerkt.", "completed")
             push_event("completed", row["title"], "Radarr reports the movie file is available")
     return changed
 
@@ -1487,7 +1489,7 @@ def process_once(force=False):
     rows = read_queue()
     changed = False
     drip_mode = config["app"].get("dripMode", "sync")
-    push_liveblog("Ik word wakker en kijk wat er in mijn wachtrij staat.", "checking")
+    push_liveblog("Nieuwe ronde: de wachtrij wordt gecontroleerd.", "checking")
 
     try:
         if refresh_completed_items(config, rows):
@@ -1500,7 +1502,7 @@ def process_once(force=False):
 
     active_item = latest_active_item(rows)
     if drip_mode == "sync" and active_item:
-        push_liveblog(f"Ik wacht nog even met de volgende film, want {active_item['title']} is nog niet klaar volgens Radarr.", "waiting")
+        push_liveblog(f"Even wachten met de volgende film: {active_item['title']} is nog niet klaar volgens Radarr.", "waiting")
         push_liveblog(next_check_text(config), "waiting")
         LAST_RUN.update(
             {
@@ -1518,7 +1520,7 @@ def process_once(force=False):
     selected = [row for row in rows if row["status"] == "todo"][:max_items]
     if not selected:
         LAST_RUN.update({"at": utc_now(), "message": "No todo items."})
-        push_liveblog("Ik heb nu geen nieuwe films klaarstaan. Ik blijf rustig wachten.", "idle")
+        push_liveblog("Geen nieuwe films klaar voor de volgende drip. Rustige wachtstand.", "idle")
         push_liveblog(next_check_text(config), "idle")
         if changed:
             write_queue(rows)
@@ -1530,14 +1532,14 @@ def process_once(force=False):
         try:
             if item["type"] == "movie":
                 payload = radarr_payload(config, item)
-                push_liveblog(f"Radarr is oké, ik ga {item['title']} klaarzetten om te downloaden.", "adding")
+                push_liveblog(f"Radarr is oké; {item['title']} wordt klaargezet om te downloaden.", "adding")
                 if radarr_has_tmdb(config, payload["tmdbId"]):
                     item["status"] = "skipped"
                     item["error"] = "Already exists in Radarr (duplicate prevented)."
                     item["addedAt"] = utc_now()
                     changed = True
                     LAST_RUN.update({"at": item["addedAt"], "message": f"Skipped (already present): {item['title']}"})
-                    push_liveblog(f"{item['title']} staat al in Radarr. Ik sla hem netjes over.", "skipped")
+                    push_liveblog(f"{item['title']} staat al in Radarr. Netjes overgeslagen.", "skipped")
                     push_event("skipped", item["title"], "Already exists in Radarr")
                     continue
                 service_request(config["radarr"], "POST", "/movie", payload)
@@ -1552,7 +1554,7 @@ def process_once(force=False):
                     item["addedAt"] = utc_now()
                     changed = True
                     LAST_RUN.update({"at": item["addedAt"], "message": f"Skipped (already present): {item['title']}"})
-                    push_liveblog(f"{item['title']} staat al in Sonarr. Ik ga door naar wat hierna komt.", "skipped")
+                    push_liveblog(f"{item['title']} staat al in Sonarr. Door naar wat hierna komt.", "skipped")
                     push_event("skipped", item["title"], "Already exists in Sonarr")
                     continue
                 service_request(config["sonarr"], "POST", "/series", payload)
@@ -1569,11 +1571,11 @@ def process_once(force=False):
                 if post_add_reason:
                     item["error"] = post_add_reason
                 status_message, status_mood = radarr_status_liveblog_message(item["title"], post_add_status)
-                push_liveblog("Radarr heeft de add-opdracht geaccepteerd; ik controleer meteen of zoeken of downloaden zichtbaar is.", "checking")
+                push_liveblog("Radarr heeft de add-opdracht geaccepteerd; zoeken of downloaden wordt meteen gecontroleerd.", "checking")
                 push_liveblog(status_message, status_mood)
             next_item = next((row for row in rows if row.get("status") == "todo"), None)
             if next_item:
-                push_liveblog(f"De volgende zet ik alvast klaar in mijn hoofd: {next_item['title']}. Eerst laat ik Radarr deze afronden.", "adding")
+                push_liveblog(f"Alvast in beeld: {next_item['title']}. Eerst mag Radarr deze afronden.", "adding")
             push_liveblog(next_check_text(config), "waiting")
             push_liveblog(f"{item['title']} is correct naar Radarr gestuurd en wordt nu door Radarr opgepakt.", "added")
             push_event("added", item["title"], "Added to downloader")
@@ -1585,7 +1587,7 @@ def process_once(force=False):
                 item["addedAt"] = utc_now()
                 changed = True
                 LAST_RUN.update({"at": item["addedAt"], "message": f"Skipped (unresolvable): {item['title']}"})
-                push_liveblog(f"Ik kan {item['title']} niet goed koppelen aan Radarr. Ik sla hem over zodat de wachtrij doorloopt.", "skipped_no_indexer")
+                push_liveblog(f"{item['title']} kan niet goed aan Radarr gekoppeld worden. Overgeslagen zodat de wachtrij doorloopt.", "skipped_no_indexer")
                 push_event("skipped", item["title"], "Unresolvable IMDb mapping")
             else:
                 item["status"] = "failed"
@@ -1762,7 +1764,7 @@ def page(config, queue):
     liveblog_rows = "\n".join(
         f"<li><small>{html.escape(format_time_only(entry.get('at')))}</small><span>{html.escape(entry.get('message',''))}</span></li>"
         for entry in LIVEBLOG[:12]
-    ) or "<li><small>--:--</small><span>Ik sta klaar. Zet de worker aan en ik begin met Radarr controleren.</span></li>"
+    ) or "<li><small>--:--</small><span>Klaar voor de start. Zet de worker aan en Radarr wordt gecontroleerd.</span></li>"
     rabbit_mood = rabbit_mood_info(LIVEBLOG[0].get("mood") if LIVEBLOG else "idle")
     rabbit_hover_title = rabbit_title(rabbit_mood["label"])
     rabbit_alt_label = rabbit_label_text(rabbit_mood["label"])
@@ -2029,7 +2031,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
   </div>
 </div>
 <div class=\"dashboard-grid\">
-<div class=\"panel liveblog-panel\"><div class=\"liveblog-head\"><div><h3>Driparr liveblog</h3><p class=\"sub\" style=\"margin-bottom:10px\">Ik vertel hier live wat ik achter de schermen aan het doen ben.</p></div><div class=\"rabbit-mood\" data-mood-label=\"{html.escape(rabbit_mood['label'])}\" title=\"{html.escape(rabbit_hover_title)}\"><img id=\"rabbitMoodImg\" src=\"{html.escape(rabbit_mood['src'])}\" data-mood=\"{html.escape(LIVEBLOG[0].get('mood') if LIVEBLOG else 'idle')}\" alt=\"Driparr rabbit mood: {html.escape(rabbit_alt_label)}\"></div></div><div class=\"feed-list liveblog-list\"><ul id=\"liveblogRows\">{liveblog_rows}</ul></div></div>
+<div class=\"panel liveblog-panel\"><div class=\"liveblog-head\"><div><h3>Driparr liveblog</h3><p class=\"sub\" style=\"margin-bottom:10px\">Live updates from the checks running behind the scenes.</p></div><div class=\"rabbit-mood\" data-mood-label=\"{html.escape(rabbit_mood['label'])}\" title=\"{html.escape(rabbit_hover_title)}\"><img id=\"rabbitMoodImg\" src=\"{html.escape(rabbit_mood['src'])}\" data-mood=\"{html.escape(LIVEBLOG[0].get('mood') if LIVEBLOG else 'idle')}\" alt=\"Driparr rabbit mood: {html.escape(rabbit_alt_label)}\"></div></div><div class=\"feed-list liveblog-list\"><ul id=\"liveblogRows\">{liveblog_rows}</ul></div></div>
 <div class=\"panel\"><h3 style=\"margin-top:0\">Recent Events</h3><p class=\"sub\">What Driparr has done recently.</p><div class=\"feed-list\"><ul>{event_rows}</ul></div></div>
 <div class=\"panel\"><h3 style=\"margin-top:0\" data-i18n=\"already_library\">Already in Library</h3><p class=\"sub\" data-i18n=\"already_library_sub\">Automatically skipped to prevent duplicates.</p><div class=\"feed-list\"><ul>{skipped_rows}</ul></div></div>
 <div class=\"panel\"><h3 style=\"margin-top:0\">Skipped: No Release</h3><p class=\"sub\">Radarr searched but did not grab a release, or reported no usable indexer.</p><div class=\"feed-list\"><ul>{no_indexer_rows}</ul></div></div>
@@ -2143,22 +2145,37 @@ function translateRuntimeText(value) {{
     [/Radarr bevestigt: (.+?) ontbreekt nog in de library\\./g, 'Radarr bestätigt: $1 fehlt noch in der Bibliothek.'],
     [/Radarr bevestigt: (.+?) levert geen bruikbare download op\\./g, 'Radarr bestätigt: $1 liefert keinen nutzbaren Download.'],
     [/Radarr-status voor (.+?): geen extra detail gekregen\\./g, 'Radarr-Status für $1: keine weiteren Details erhalten.'],
+    [/Volgende controle over ongeveer 1 minuut, rond ([0-9:]+)\\./g, 'Nächste Prüfung in etwa 1 Minute, gegen $1.'],
+    [/Volgende controle over ongeveer (\\d+) minuten, rond ([0-9:]+)\\./g, 'Nächste Prüfung in etwa $1 Minuten, gegen $2.'],
     [/Ik ga over ongeveer 1 minuut opnieuw kijken, rond ([0-9:]+)\\./g, 'Ich prüfe in etwa 1 Minute erneut, gegen $1.'],
     [/Ik ga over ongeveer (\\d+) minuten opnieuw kijken, rond ([0-9:]+)\\./g, 'Ich prüfe in etwa $1 Minuten erneut, gegen $2.'],
+    [/Statusvraag naar Radarr voor (.+?)\\./g, 'Statusfrage an Radarr für $1.'],
     [/Ik vraag Radarr via de API om status voor (.+?)\\./g, 'Ich frage Radarr per API nach dem Status von $1.'],
+    [/(.+?) gaat naar voltooid\\./g, '$1 wird als abgeschlossen markiert.'],
     [/Ik zet (.+?) bij voltooid\\./g, 'Ich markiere $1 als abgeschlossen.'],
+    [/(.+?) wordt overgeslagen; de volgende komt zo aan de beurt\\./g, '$1 wird übersprungen; der nächste Eintrag ist gleich dran.'],
     [/Ik sla (.+?) over en pak zo de volgende\\./g, 'Ich überspringe $1 und nehme gleich den nächsten Eintrag.'],
+    [/Nieuwe ronde: de wachtrij wordt gecontroleerd\\./g, 'Neue Runde: Die Queue wird geprüft.'],
     [/Ik word wakker en kijk wat er in mijn wachtrij staat\\./g, 'Ich wache auf und prüfe meine Queue.'],
+    [/Even wachten met de volgende film: (.+?) is nog niet klaar volgens Radarr\\./g, 'Kurz warten mit dem nächsten Film: $1 ist laut Radarr noch nicht fertig.'],
     [/Ik wacht nog even met de volgende film, want (.+?) is nog niet klaar volgens Radarr\\./g, 'Ich warte mit dem nächsten Film, weil $1 laut Radarr noch nicht fertig ist.'],
+    [/Geen nieuwe films klaar voor de volgende drip\\. Rustige wachtstand\\./g, 'Keine neuen Filme für den nächsten Drip bereit. Ruhiger Wartemodus.'],
     [/Ik heb nu geen nieuwe films klaarstaan\\. Ik blijf rustig wachten\\./g, 'Ich habe gerade keine neuen Filme bereit. Ich warte ruhig weiter.'],
     [/Radarr geeft een fout terug tijdens mijn controle: (.+)/g, 'Radarr gibt bei meiner Prüfung einen Fehler zurück: $1'],
+    [/Radarr is ok.; (.+?) wordt klaargezet om te downloaden\\./g, 'Radarr ist in Ordnung; $1 wird zum Herunterladen vorbereitet.'],
     [/Radarr is oké, ik ga (.+?) klaarzetten om te downloaden\\./g, 'Radarr ist in Ordnung; ich bereite $1 zum Herunterladen vor.'],
+    [/Radarr heeft de add-opdracht geaccepteerd; zoeken of downloaden wordt meteen gecontroleerd\\./g, 'Radarr hat den Add-Befehl akzeptiert; Suche oder Download wird sofort geprüft.'],
     [/Radarr heeft de add-opdracht geaccepteerd; ik controleer meteen of zoeken of downloaden zichtbaar is\\./g, 'Radarr hat den Add-Befehl akzeptiert; ich prüfe sofort, ob Suche oder Download sichtbar ist.'],
+    [/Alvast in beeld: (.+?)\\. Eerst mag Radarr deze afronden\\./g, 'Schon im Blick: $1. Zuerst darf Radarr diesen Eintrag abschließen.'],
     [/De volgende zet ik alvast klaar in mijn hoofd: (.+?)\\. Eerst laat ik Radarr deze afronden\\./g, 'Den nächsten merke ich mir schon vor: $1. Zuerst lasse ich Radarr diesen abschließen.'],
     [/(.+?) is correct naar Radarr gestuurd en wordt nu door Radarr opgepakt\\./g, '$1 wurde korrekt an Radarr gesendet und wird jetzt von Radarr verarbeitet.'],
+    [/(.+?) is klaar\\. De wachtrij wordt bijgewerkt\\./g, '$1 ist fertig. Die Queue wird aktualisiert.'],
     [/(.+?) is klaar\\. Ik ruim mijn wachtrij bij\\./g, '$1 ist fertig. Ich räume meine Queue auf.'],
+    [/(.+?) staat al in Radarr\\. Netjes overgeslagen\\./g, '$1 ist bereits in Radarr. Sauber übersprungen.'],
     [/(.+?) staat al in Radarr\\. Ik sla hem netjes over\\./g, '$1 ist bereits in Radarr. Ich überspringe ihn sauber.'],
+    [/(.+?) staat al in Sonarr\\. Door naar wat hierna komt\\./g, '$1 ist bereits in Sonarr. Weiter mit dem nächsten Eintrag.'],
     [/(.+?) staat al in Sonarr\\. Ik ga door naar wat hierna komt\\./g, '$1 ist bereits in Sonarr. Ich mache mit dem nächsten Eintrag weiter.'],
+    [/(.+?) kan niet goed aan Radarr gekoppeld worden\\. Overgeslagen zodat de wachtrij doorloopt\\./g, '$1 kann nicht sauber mit Radarr verknüpft werden. Übersprungen, damit die Queue weiterläuft.'],
     [/Ik kan (.+?) niet goed koppelen aan Radarr\\. Ik sla hem over zodat de wachtrij doorloopt\\./g, 'Ich kann $1 nicht sauber mit Radarr verknüpfen. Ich überspringe ihn, damit die Queue weiterläuft.'],
     [/Er ging iets mis met (.+?): (.+)/g, 'Bei $1 ist etwas schiefgelaufen: $2'],
     [/Radarr markeert de download als probleem\\./g, 'Radarr markiert den Download als Problem.'],
@@ -2174,6 +2191,7 @@ function translateRuntimeText(value) {{
     [/Radarr heeft na (\\d+) seconden geen queued download, gegrepen release of import voor deze film\\./g, 'Radarr hat nach $1 Sekunden keinen Queue-Download, keine gegriffene Release und keinen Import für diesen Film.'],
     [/Radarr is klaar met zoeken, maar heeft geen release gegrepen of download gestart\\./g, 'Radarr ist mit der Suche fertig, hat aber keine Release gegriffen und keinen Download gestartet.'],
     [/Radarr heeft geen bruikbare indexer:/g, 'Radarr hat keinen nutzbaren Indexer:'],
+    [/Radarr zoekt nog naar bruikbare resultaten\\./g, 'Radarr sucht noch nach brauchbaren Ergebnissen.'],
     [/Ik wacht op de zoekresultaten van Radarr\\./g, 'Ich warte auf die Suchergebnisse von Radarr.'],
     [/De wacht wordt gehouden\\. Stilte betekent niet dat er geslapen wordt\\./g, 'Ich halte Wache. Stille bedeutet nicht, dass geschlafen wird.'],
     [/Even de oren gespitst\\. Nog geen nieuw Radarr-nieuws\\./g, 'Kurz aufgehorcht. Noch keine neuen Radarr-Nachrichten.'],
@@ -2183,25 +2201,35 @@ function translateRuntimeText(value) {{
     [/De volgende stap krijgt alvast een strenge blik\\. Vriendelijk streng\\./g, 'Der nächste Schritt bekommt schon mal einen strengen Blick. Freundlich streng.'],
     [/Alles staat nog onder controle\\. Even knipperen en zo weer verder\\./g, 'Alles ist noch unter Kontrolle. Kurz blinzeln, dann geht es weiter.'],
     [/Incomplete downloads horen eerst af te maken\\. Daar is een duidelijke mening over\\./g, 'Unvollständige Downloads sollten erst fertig werden. Dazu gibt es eine klare Meinung.'],
+    [/Schaapjes tellen\\? Liever queue-items\\. Veel nuttiger\\./g, 'Schäfchen zählen? Lieber Queue-Einträge. Viel nützlicher.'],
     [/Ik tel geen schaapjes, ik tel queue-items\\. Veel nuttiger\\./g, 'Ich zähle keine Schäfchen, ich zähle Queue-Einträge. Viel nützlicher.'],
     [/Radarr krijgt zo weer een keurige statusvraag\\. Met nette schoenen aan\\./g, 'Radarr bekommt gleich wieder eine ordentliche Statusfrage. Mit guten Schuhen.'],
+    [/De importdeur staat op een kier; binnenkomende films worden gezien\\./g, 'Die Importtür steht einen Spalt offen; eintreffende Filme werden gesehen.'],
     [/Ik houd de importdeur op een kier en kijk of er iets binnenkomt\\./g, 'Ich halte die Importtür einen Spalt offen und schaue, ob etwas hereinkommt.'],
+    [/Geen paniek in de downloadstraat\\. Gewoon nog een nette controle\\./g, 'Keine Panik in der Downloadstraße. Einfach noch eine ordentliche Prüfung.'],
     [/Geen paniek in de downloadstraat\\. Ik kijk gewoon nog een keer\\./g, 'Keine Panik in der Downloadstraße. Ich schaue einfach noch einmal.'],
     [/De wachtrij staat recht, de koffie is denkbeeldig, de aandacht is echt\\./g, 'Die Queue steht gerade, der Kaffee ist imaginär, die Aufmerksamkeit ist echt.'],
+    [/Radarr klinkt vandaag als een spannend hoorspel\\./g, 'Radarr klingt heute wie ein spannendes Hörspiel.'],
     [/Ik luister naar Radarr alsof het een spannend hoorspel is\\./g, 'Ich höre Radarr zu, als wäre es ein spannendes Hörspiel.'],
     [/Er wordt niets geforceerd\\. Alleen vriendelijk doch beslist gecontroleerd\\./g, 'Es wird nichts erzwungen. Nur freundlich, aber bestimmt geprüft.'],
+    [/De volgende film staat al in beeld, maar eerst deze netjes afronden\\./g, 'Der nächste Film ist schon im Blick, aber erst wird dieser sauber abgeschlossen.'],
     [/Ik heb de volgende film al in het vizier, maar eerst deze netjes afronden\\./g, 'Ich habe den nächsten Film schon im Blick, aber erst wird dieser sauber abgeschlossen.'],
     [/Statuscontrole onderweg\\. Klein knikje naar de API\\./g, 'Statusprüfung unterwegs. Kleines Nicken an die API.'],
     [/Alles rustig\\. Dat is soms precies wat je wilt zien\\./g, 'Alles ruhig. Manchmal ist genau das richtig.'],
+    [/De voortgangsbalk krijgt in gedachten nog even een poetsbeurt\\./g, 'Der Fortschrittsbalken bekommt in Gedanken noch kurz eine Politur.'],
     [/Ik poets de voortgangsbalk nog even op in mijn hoofd\\./g, 'Ich poliere den Fortschrittsbalken kurz in Gedanken.'],
     [/Als Radarr iets nieuws fluistert, zet ik het hier meteen neer\\./g, 'Wenn Radarr etwas Neues flüstert, schreibe ich es sofort hier hin.'],
+    [/De deur blijft bewaakt tot de download zich meldt\\./g, 'Die Tür bleibt bewacht, bis der Download sich meldet.'],
     [/Ik blijf bij de deur staan tot de download zich meldt\\./g, 'Ich bleibe an der Tür stehen, bis der Download sich meldet.'],
     [/Even de lijst rechttrekken\\. Niemand raakt hier zoek\\./g, 'Kurz die Liste geradeziehen. Hier geht niemand verloren.'],
     [/Rustig tempo, scherpe blik\\. Zo hoort een drip te lopen\\./g, 'Ruhiges Tempo, scharfer Blick. So soll ein Drip laufen.'],
+    [/Straks nog een blik: rood moet echt rood zijn, niet stiekem bijna groen\\./g, 'Gleich noch ein Blick: Rot muss wirklich Rot sein, nicht heimlich fast Grün.'],
     [/Ik controleer zo weer of rood echt rood is, en niet stiekem bijna groen\\./g, 'Ich prüfe gleich wieder, ob Rot wirklich Rot ist und nicht heimlich fast Grün.'],
     [/De queue krijgt geen haast, wel aandacht\\./g, 'Die Queue bekommt keine Eile, aber Aufmerksamkeit.'],
+    [/Bewijs boven hoop\\. Radarr mag het zeggen\\./g, 'Belege statt Hoffnung. Radarr darf sprechen.'],
     [/Ik wacht op bewijs, niet op hoop\\. Radarr mag het zeggen\\./g, 'Ich warte auf Belege, nicht auf Hoffnung. Radarr darf sprechen.'],
     [/Kleine ronde langs de statuslampjes\\. Alles krijgt een blik\\./g, 'Kleine Runde entlang der Statuslichter. Alles bekommt einen Blick.'],
+    [/Netjes werken blijft het plan: eerst weten, dan doen\\./g, 'Sauber arbeiten bleibt der Plan: erst wissen, dann handeln.'],
     [/Ik hou het netjes: eerst weten, dan doen\\./g, 'Ich halte es sauber: erst wissen, dann handeln.']
   ] : [
     [/Radarr bevestigt: (.+?) is binnen\\./g, 'Radarr confirms: $1 is available.'],
@@ -2210,22 +2238,37 @@ function translateRuntimeText(value) {{
     [/Radarr bevestigt: (.+?) ontbreekt nog in de library\\./g, 'Radarr confirms: $1 is still missing from the library.'],
     [/Radarr bevestigt: (.+?) levert geen bruikbare download op\\./g, 'Radarr confirms: $1 has no usable download.'],
     [/Radarr-status voor (.+?): geen extra detail gekregen\\./g, 'Radarr status for $1: no extra detail received.'],
+    [/Volgende controle over ongeveer 1 minuut, rond ([0-9:]+)\\./g, 'Next check in about 1 minute, around $1.'],
+    [/Volgende controle over ongeveer (\\d+) minuten, rond ([0-9:]+)\\./g, 'Next check in about $1 minutes, around $2.'],
     [/Ik ga over ongeveer 1 minuut opnieuw kijken, rond ([0-9:]+)\\./g, 'I will check again in about 1 minute, around $1.'],
     [/Ik ga over ongeveer (\\d+) minuten opnieuw kijken, rond ([0-9:]+)\\./g, 'I will check again in about $1 minutes, around $2.'],
+    [/Statusvraag naar Radarr voor (.+?)\\./g, 'Status request to Radarr for $1.'],
     [/Ik vraag Radarr via de API om status voor (.+?)\\./g, 'I am asking Radarr through the API for the status of $1.'],
+    [/(.+?) gaat naar voltooid\\./g, '$1 is being marked completed.'],
     [/Ik zet (.+?) bij voltooid\\./g, 'I am marking $1 as completed.'],
+    [/(.+?) wordt overgeslagen; de volgende komt zo aan de beurt\\./g, '$1 is being skipped; the next item is coming up shortly.'],
     [/Ik sla (.+?) over en pak zo de volgende\\./g, 'I am skipping $1 and will pick up the next item shortly.'],
+    [/Nieuwe ronde: de wachtrij wordt gecontroleerd\\./g, 'New round: the queue is being checked.'],
     [/Ik word wakker en kijk wat er in mijn wachtrij staat\\./g, 'I am waking up and checking my queue.'],
+    [/Even wachten met de volgende film: (.+?) is nog niet klaar volgens Radarr\\./g, 'A short wait before the next movie: Radarr says $1 is not done yet.'],
     [/Ik wacht nog even met de volgende film, want (.+?) is nog niet klaar volgens Radarr\\./g, 'I am waiting before adding the next movie because Radarr says $1 is not done yet.'],
+    [/Geen nieuwe films klaar voor de volgende drip\\. Rustige wachtstand\\./g, 'No new movies ready for the next drip. Calm waiting mode.'],
     [/Ik heb nu geen nieuwe films klaarstaan\\. Ik blijf rustig wachten\\./g, 'I have no new movies ready right now. I will keep waiting.'],
     [/Radarr geeft een fout terug tijdens mijn controle: (.+)/g, 'Radarr returned an error during my check: $1'],
+    [/Radarr is ok.; (.+?) wordt klaargezet om te downloaden\\./g, 'Radarr is OK; $1 is being prepared for download.'],
     [/Radarr is oké, ik ga (.+?) klaarzetten om te downloaden\\./g, 'Radarr is OK; I am preparing $1 for download.'],
+    [/Radarr heeft de add-opdracht geaccepteerd; zoeken of downloaden wordt meteen gecontroleerd\\./g, 'Radarr accepted the add command; searching or downloading is being checked immediately.'],
     [/Radarr heeft de add-opdracht geaccepteerd; ik controleer meteen of zoeken of downloaden zichtbaar is\\./g, 'Radarr accepted the add command; I am immediately checking whether searching or downloading is visible.'],
+    [/Alvast in beeld: (.+?)\\. Eerst mag Radarr deze afronden\\./g, 'Already in sight: $1. First Radarr gets to finish this one.'],
     [/De volgende zet ik alvast klaar in mijn hoofd: (.+?)\\. Eerst laat ik Radarr deze afronden\\./g, 'I am keeping the next item ready: $1. First I will let Radarr finish this one.'],
     [/(.+?) is correct naar Radarr gestuurd en wordt nu door Radarr opgepakt\\./g, '$1 was sent to Radarr correctly and is now being picked up by Radarr.'],
+    [/(.+?) is klaar\\. De wachtrij wordt bijgewerkt\\./g, '$1 is done. The queue is being updated.'],
     [/(.+?) is klaar\\. Ik ruim mijn wachtrij bij\\./g, '$1 is done. I am cleaning up my queue.'],
+    [/(.+?) staat al in Radarr\\. Netjes overgeslagen\\./g, '$1 is already in Radarr. Cleanly skipped.'],
     [/(.+?) staat al in Radarr\\. Ik sla hem netjes over\\./g, '$1 is already in Radarr. I am skipping it cleanly.'],
+    [/(.+?) staat al in Sonarr\\. Door naar wat hierna komt\\./g, '$1 is already in Sonarr. Moving on to what comes next.'],
     [/(.+?) staat al in Sonarr\\. Ik ga door naar wat hierna komt\\./g, '$1 is already in Sonarr. I am moving on to what comes next.'],
+    [/(.+?) kan niet goed aan Radarr gekoppeld worden\\. Overgeslagen zodat de wachtrij doorloopt\\./g, '$1 cannot be linked to Radarr cleanly. Skipped so the queue keeps moving.'],
     [/Ik kan (.+?) niet goed koppelen aan Radarr\\. Ik sla hem over zodat de wachtrij doorloopt\\./g, 'I cannot link $1 to Radarr cleanly. I am skipping it so the queue keeps moving.'],
     [/Er ging iets mis met (.+?): (.+)/g, 'Something went wrong with $1: $2'],
     [/Radarr markeert de download als probleem\\./g, 'Radarr marks the download as a problem.'],
@@ -2241,6 +2284,7 @@ function translateRuntimeText(value) {{
     [/Radarr heeft na (\\d+) seconden geen queued download, gegrepen release of import voor deze film\\./g, 'After $1 seconds, Radarr has no queued download, grabbed release, or import for this movie.'],
     [/Radarr is klaar met zoeken, maar heeft geen release gegrepen of download gestart\\./g, 'Radarr finished searching, but did not grab a release or start a download.'],
     [/Radarr heeft geen bruikbare indexer:/g, 'Radarr has no usable indexer:'],
+    [/Radarr zoekt nog naar bruikbare resultaten\\./g, 'Radarr is still looking for usable results.'],
     [/Ik wacht op de zoekresultaten van Radarr\\./g, 'I am waiting for Radarr search results.'],
     [/De wacht wordt gehouden\\. Stilte betekent niet dat er geslapen wordt\\./g, 'I am keeping watch. Silence does not mean I am asleep.'],
     [/Even de oren gespitst\\. Nog geen nieuw Radarr-nieuws\\./g, 'Quick status check. No new Radarr news yet.'],
@@ -2250,25 +2294,35 @@ function translateRuntimeText(value) {{
     [/De volgende stap krijgt alvast een strenge blik\\. Vriendelijk streng\\./g, 'The next step is already getting a strict look. Kindly strict.'],
     [/Alles staat nog onder controle\\. Even knipperen en zo weer verder\\./g, 'Everything is still under control. A quick blink, then onward.'],
     [/Incomplete downloads horen eerst af te maken\\. Daar is een duidelijke mening over\\./g, 'Incomplete downloads should finish first. I have a clear opinion about that.'],
+    [/Schaapjes tellen\\? Liever queue-items\\. Veel nuttiger\\./g, 'Counting sheep? Queue items are much more useful.'],
     [/Ik tel geen schaapjes, ik tel queue-items\\. Veel nuttiger\\./g, 'I am not counting sheep, I am counting queue items. Much more useful.'],
     [/Radarr krijgt zo weer een keurige statusvraag\\. Met nette schoenen aan\\./g, 'Radarr is about to get a very tidy status question. Proper shoes included.'],
+    [/De importdeur staat op een kier; binnenkomende films worden gezien\\./g, 'The import door is slightly open; incoming movies will be noticed.'],
     [/Ik houd de importdeur op een kier en kijk of er iets binnenkomt\\./g, 'I am keeping the import door slightly open and watching what comes in.'],
+    [/Geen paniek in de downloadstraat\\. Gewoon nog een nette controle\\./g, 'No panic on download street. Just one more tidy check.'],
     [/Geen paniek in de downloadstraat\\. Ik kijk gewoon nog een keer\\./g, 'No panic on download street. I will simply check again.'],
     [/De wachtrij staat recht, de koffie is denkbeeldig, de aandacht is echt\\./g, 'The queue is straight, the coffee is imaginary, the attention is real.'],
+    [/Radarr klinkt vandaag als een spannend hoorspel\\./g, 'Radarr sounds like a suspenseful radio play today.'],
     [/Ik luister naar Radarr alsof het een spannend hoorspel is\\./g, 'I am listening to Radarr like it is a suspenseful radio play.'],
     [/Er wordt niets geforceerd\\. Alleen vriendelijk doch beslist gecontroleerd\\./g, 'Nothing is being forced. Just checked kindly and firmly.'],
+    [/De volgende film staat al in beeld, maar eerst deze netjes afronden\\./g, 'The next movie is already in sight, but this one gets finished cleanly first.'],
     [/Ik heb de volgende film al in het vizier, maar eerst deze netjes afronden\\./g, 'I already have the next movie in sight, but this one gets finished cleanly first.'],
     [/Statuscontrole onderweg\\. Klein knikje naar de API\\./g, 'Status check underway. A small nod to the API.'],
     [/Alles rustig\\. Dat is soms precies wat je wilt zien\\./g, 'Everything is calm. Sometimes that is exactly what you want to see.'],
+    [/De voortgangsbalk krijgt in gedachten nog even een poetsbeurt\\./g, 'The progress bar gets a quick polish in thought.'],
     [/Ik poets de voortgangsbalk nog even op in mijn hoofd\\./g, 'I am polishing the progress bar in my head for a moment.'],
     [/Als Radarr iets nieuws fluistert, zet ik het hier meteen neer\\./g, 'If Radarr whispers anything new, I will put it here right away.'],
+    [/De deur blijft bewaakt tot de download zich meldt\\./g, 'The door stays watched until the download checks in.'],
     [/Ik blijf bij de deur staan tot de download zich meldt\\./g, 'I am staying by the door until the download checks in.'],
     [/Even de lijst rechttrekken\\. Niemand raakt hier zoek\\./g, 'Straightening the list for a moment. Nobody gets lost here.'],
     [/Rustig tempo, scherpe blik\\. Zo hoort een drip te lopen\\./g, 'Calm pace, sharp eye. That is how a drip should run.'],
+    [/Straks nog een blik: rood moet echt rood zijn, niet stiekem bijna groen\\./g, 'One more look soon: red should really be red, not secretly almost green.'],
     [/Ik controleer zo weer of rood echt rood is, en niet stiekem bijna groen\\./g, 'I will soon check whether red is really red, and not secretly almost green.'],
     [/De queue krijgt geen haast, wel aandacht\\./g, 'The queue gets no rush, but plenty of attention.'],
+    [/Bewijs boven hoop\\. Radarr mag het zeggen\\./g, 'Evidence over hope. Radarr gets to say it.'],
     [/Ik wacht op bewijs, niet op hoop\\. Radarr mag het zeggen\\./g, 'I am waiting for evidence, not hope. Radarr gets to say it.'],
     [/Kleine ronde langs de statuslampjes\\. Alles krijgt een blik\\./g, 'A small round past the status lights. Everything gets a look.'],
+    [/Netjes werken blijft het plan: eerst weten, dan doen\\./g, 'Working cleanly remains the plan: know first, act second.'],
     [/Ik hou het netjes: eerst weten, dan doen\\./g, 'I keep it tidy: know first, act second.']
   ];
   common.forEach(([pattern, replacement]) => {{ text = text.replace(pattern, replacement); }});
@@ -2429,14 +2483,14 @@ function uiText(key) {{
   const lang = detectLanguage();
   const dict = {{
     en: {{
-      ready_liveblog:'I am ready. Turn on the worker and I will start checking Radarr.',
+      ready_liveblog:'Ready to start. Turn on the worker and Radarr will be checked.',
       no_todo:'No todo items', queue_empty:'Queue is empty', no_active:'No active drip yet',
       nothing_added:'Nothing added yet', run_worker:'Run the worker to start',
       no_queue:'No queue items yet', queue_meta:'Queue', items:'items',
       recent_events:'Recent Events', recent_events_sub:'What Driparr has done recently.',
       skipped_no_release:'Skipped: No Release',
       skipped_no_release_sub:'Radarr searched but did not grab a release, or reported no usable indexer.',
-      liveblog_title:'Driparr liveblog', liveblog_sub:'I report live what I am doing behind the scenes.',
+      liveblog_title:'Driparr liveblog', liveblog_sub:'Live updates from the checks running behind the scenes.',
       liveblog_chip:'Live status feed',
       check_radarr:'Check Radarr', clear_all:'Clear all', choose_file:'Choose file', no_file:'No file selected',
       saved_lists:'Saved lists', run_history:'Run history', webhook_notifications:'Webhook notifications',
@@ -2456,14 +2510,14 @@ function uiText(key) {{
       clear_queue_confirm:'Are you sure you want to clear the full queue?'
     }},
     nl: {{
-      ready_liveblog:'Ik sta klaar. Zet de worker aan en ik begin met Radarr controleren.',
+      ready_liveblog:'Klaar voor de start. Zet de worker aan en Radarr wordt gecontroleerd.',
       no_todo:'Geen todo items', queue_empty:'Queue is leeg', no_active:'Nog geen actieve drip',
       nothing_added:'Nog niets toegevoegd', run_worker:'Start de worker om te beginnen',
       no_queue:'Nog geen queue-items', queue_meta:'Queue', items:'items',
       recent_events:'Recente gebeurtenissen', recent_events_sub:'Wat Driparr recent heeft gedaan.',
       skipped_no_release:'Overgeslagen: geen release',
       skipped_no_release_sub:'Radarr heeft gezocht maar geen release gegrepen, of meldt geen bruikbare indexer.',
-      liveblog_title:'Driparr liveblog', liveblog_sub:'Ik vertel hier live wat ik achter de schermen aan het doen ben.',
+      liveblog_title:'Driparr liveblog', liveblog_sub:'Live updates van de controles achter de schermen.',
       liveblog_chip:'Live statusfeed',
       check_radarr:'Controleer Radarr', clear_all:'Alles wissen', choose_file:'Bestand kiezen', no_file:'Geen bestand geselecteerd',
       saved_lists:'Opgeslagen lijsten', run_history:'Runhistorie', webhook_notifications:'Webhookmeldingen',
@@ -2483,14 +2537,14 @@ function uiText(key) {{
       clear_queue_confirm:'Weet je zeker dat je de volledige queue wilt wissen?'
     }},
     de: {{
-      ready_liveblog:'Ich bin bereit. Aktiviere den Worker, dann beginne ich mit der Radarr-Prüfung.',
+      ready_liveblog:'Bereit zum Start. Aktiviere den Worker, dann wird Radarr geprüft.',
       no_todo:'Keine Todo-Einträge', queue_empty:'Queue ist leer', no_active:'Noch kein aktiver Drip',
       nothing_added:'Noch nichts hinzugefügt', run_worker:'Starte den Worker, um zu beginnen',
       no_queue:'Noch keine Queue-Einträge', queue_meta:'Queue', items:'Einträge',
       recent_events:'Letzte Ereignisse', recent_events_sub:'Was Driparr zuletzt getan hat.',
       skipped_no_release:'Übersprungen: keine Release',
       skipped_no_release_sub:'Radarr hat gesucht, aber keine Release gegriffen, oder meldet keinen nutzbaren Indexer.',
-      liveblog_title:'Driparr-Liveblog', liveblog_sub:'Ich berichte live, was ich im Hintergrund mache.',
+      liveblog_title:'Driparr-Liveblog', liveblog_sub:'Live-Updates aus den Prüfungen im Hintergrund.',
       liveblog_chip:'Live-Statusfeed',
       check_radarr:'Radarr prüfen', clear_all:'Alles löschen', choose_file:'Datei auswählen', no_file:'Keine Datei ausgewählt',
       saved_lists:'Gespeicherte Listen', run_history:'Laufhistorie', webhook_notifications:'Webhook-Benachrichtigungen',
