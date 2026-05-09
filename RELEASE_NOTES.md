@@ -1,24 +1,26 @@
-# Driparr v0.1.13
+# Driparr v0.1.14
 
-Radarr red queue detection release for Driparr.
+Trust and clarity release for Driparr.
 
-This release makes Driparr treat Radarr red/warning/failed/stalled/import-blocked queue entries as failed downloads, so the item is skipped instead of waiting forever. It also keeps the live Radarr status, external-download protection, and dashboard refresh improvements from the previous build.
+This release focuses on making Driparr's behavior clear enough for real user feedback. It improves Radarr status handling, live feedback, language consistency, and sync-mode behavior.
 
 ## Highlights
 
 - IMDb CSV import for movie and series exports.
 - Radarr onboarding with connection test, quality profile selection, and root folder setup.
-- Queue dashboard with human-readable status and reason display.
+- Queue dashboard with readable status and reason display.
 - Duplicate protection: existing Radarr movies are skipped instead of re-added.
-- Drip-feed worker with configurable interval and max items per run.
-- Sync mode that waits for active downloads to complete before adding the next item.
+- Timed drip mode with configurable interval and max items per run.
+- Sync mode waits only for Driparr's own active queue item, not unrelated Radarr downloads.
+- Radarr red/warning/failed/stalled/import-blocked queue entries are treated as failed downloads so items can be skipped instead of waiting forever.
+- No-release and unresolvable IMDb cases now show clearer queue reasons and liveblog messages.
+- The visual Drip Timeline and queue refresh automatically without requiring F5.
+- Live updates preserve scroll position.
+- Dutch, English, and German UI/language handling has been tightened across static UI, liveblog, queue reasons, onboarding, and service settings.
+- Rabbit mood hover text follows the selected/forced language from the initial HTML render.
 - Run history and optional webhook notifications.
 - Docker Compose and Portainer-ready deployment examples.
 - Mock Radarr test stack for browser testing without a real Radarr instance.
-- Driparr liveblog with synced rabbit mood icon and dynamic hover text.
-- Rabbit idle mood changes once per minute.
-- Spontaneous liveblog notes appear at most once per two minutes.
-- Radarr/Sonarr API keys are masked in the UI.
 
 ## Install
 
@@ -27,7 +29,7 @@ Create a data folder and a `docker-compose.yml`:
 ```yaml
 services:
   driparr:
-    image: ghcr.io/sander1384/driparr:v0.1.13
+    image: ghcr.io/sander1384/driparr:v0.1.14
     container_name: driparr
     restart: unless-stopped
     ports:
@@ -57,5 +59,6 @@ For Portainer/NAS usage, use `docker-compose.portainer.yml` and set at least:
 
 ## Notes
 
+- Downloads added directly in Radarr or by another app no longer block Driparr.
 - Do not publish real Radarr API keys, production `.env` files, or local config files.
 - Rotate any API keys or passwords that were used during early testing.

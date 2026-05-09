@@ -19,7 +19,7 @@
 
 Driparr is a small self-hosted web app for people who keep large IMDb watchlists and want Radarr to add movies gradually instead of all at once.
 
-Import an IMDb CSV, review the queue, choose how quickly items should drip into Radarr, and let Driparr handle the pacing. It can also skip movies that Radarr already knows about and optionally wait for the current download to finish before adding the next item.
+Import an IMDb CSV, review the queue, choose how quickly items should drip into Radarr, and let Driparr handle the pacing. It can also skip movies that Radarr already knows about and, in sync mode, wait for its own active Driparr item to finish before adding the next item.
 
 > [!IMPORTANT]
 > Driparr is intentionally focused on IMDb CSV to Radarr. It is built for predictable, visible drip-feeding rather than broad list-sync automation.
@@ -57,7 +57,7 @@ Import an IMDb CSV, review the queue, choose how quickly items should drip into 
 - Queue overview with readable status and reasons.
 - Duplicate protection for existing Radarr movies.
 - Timed drip mode with configurable interval and batch size.
-- Sync drip mode that waits for active downloads to complete.
+- Sync drip mode that waits for Driparr's own active item to complete.
 - Run history for imported lists.
 - Optional webhook notifications.
 - Mock Radarr test stack for trying Driparr without a real Radarr instance.
@@ -86,7 +86,7 @@ Create `docker-compose.yml`:
 ```yaml
 services:
   driparr:
-    image: ghcr.io/sander1384/driparr:v0.1.13
+    image: ghcr.io/sander1384/driparr:v0.1.14
     container_name: driparr
     restart: unless-stopped
     ports:
@@ -152,7 +152,7 @@ http://<NAS-IP>:18080
 | Mode | Behavior |
 | --- | --- |
 | Timed | Adds up to `maxItemsPerRun` items every configured interval. |
-| Sync | Waits until the current Radarr item appears complete before adding the next item. |
+| Sync | Waits until Driparr's own current Radarr item appears complete before adding the next item. Downloads added outside Driparr do not block the queue. |
 
 Use `Timed` for predictable batches. Use `Sync` when you want a slower one-at-a-time flow.
 
@@ -214,7 +214,7 @@ docker compose up -d
 - Confirm the queue contains `todo` items.
 - Confirm the worker is enabled.
 - Check whether items were skipped because they already exist in Radarr.
-- In sync mode, check whether Radarr still has an active download.
+- In sync mode, check whether Driparr still has one of its own queue items active.
 
 ### Login Stops Working
 
