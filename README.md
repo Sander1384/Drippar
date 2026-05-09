@@ -9,20 +9,32 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Sander1384/Drippar/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/Sander1384/Drippar?label=release"></a>
-  <a href="https://github.com/Sander1384/Drippar/actions/workflows/docker-publish.yml"><img alt="Docker build" src="https://img.shields.io/github/actions/workflow/status/Sander1384/Drippar/docker-publish.yml?branch=main&label=docker%20build"></a>
-  <a href="https://github.com/Sander1384/Drippar/pkgs/container/driparr"><img alt="GHCR" src="https://img.shields.io/badge/GHCR-driparr-blue"></a>
+  <a href="https://github.com/Sander1384/Drippar/releases/latest">
+    <img alt="Release" src="https://img.shields.io/github/v/release/Sander1384/Drippar?label=release">
+  </a>
+  <a href="https://github.com/Sander1384/Drippar/actions/workflows/docker-publish.yml">
+    <img alt="Docker build" src="https://img.shields.io/github/actions/workflow/status/Sander1384/Drippar/docker-publish.yml?branch=main&label=docker%20build">
+  </a>
+  <a href="https://github.com/Sander1384/Drippar/pkgs/container/driparr">
+    <img alt="GHCR" src="https://img.shields.io/badge/GHCR-driparr-blue">
+  </a>
   <img alt="Docker" src="https://img.shields.io/badge/docker-ready-2496ED">
 </p>
 
 ## What Is Driparr?
 
-Driparr is a small self-hosted web app for people who keep large IMDb watchlists and want Radarr to add movies gradually instead of all at once.
+Driparr is a small self-hosted web app for people who keep large IMDb watchlists and want Radarr
+to add movies gradually instead of all at once.
 
-Import an IMDb CSV, review the queue, choose how quickly items should drip into Radarr, and let Driparr handle the pacing. It can also skip movies that Radarr already knows about and, in sync mode, wait for its own active Driparr item to finish before adding the next item. The liveblog explains what Radarr is reporting, with varied status updates in Dutch, English, and German.
+Import an IMDb CSV, review the queue, choose how quickly items should drip into Radarr, and let
+Driparr handle the pacing. It can also skip movies that Radarr already knows about and, in sync
+mode, wait for its own active Driparr item to finish before adding the next item.
+The liveblog explains what Radarr is reporting, with varied status updates in Dutch, English, and
+German.
 
 > [!IMPORTANT]
-> Driparr is intentionally focused on IMDb CSV to Radarr. It is built for predictable, visible drip-feeding rather than broad list-sync automation.
+> Driparr is intentionally focused on IMDb CSV to Radarr.
+> It is built for predictable, visible drip-feeding rather than broad list-sync automation.
 
 ## Looking for testers
 
@@ -89,7 +101,8 @@ Choose one:
 
 ### Option 1: Safe test with mock Radarr
 
-The repository includes a mock Radarr stack for browser testing. This is the safest way to try Driparr without touching a real Radarr instance.
+The repository includes a mock Radarr stack for browser testing.
+This is the safest way to try Driparr without touching a real Radarr instance.
 
 ```bash
 docker compose -f docker-compose.test.yml up -d --build
@@ -153,7 +166,8 @@ http://localhost:18080
 ```
 
 Change `DRIPARR_ADMIN_PASSWORD` and `DRIPARR_SESSION_SECRET` before first use.
-You can generate a random 64-character session secret with the [IT Tools token generator](https://it-tools.tech/token-generator?length=64&numbers=false).
+You can generate a random 64-character session secret with the
+[IT Tools token generator](https://it-tools.tech/token-generator?length=64&numbers=false).
 
 ## Portainer / NAS
 
@@ -208,7 +222,8 @@ Use `Timed` for predictable batches. Use `Sync` when you want a slower one-at-a-
 
 ## What Driparr is not
 
-Driparr is not meant to replace Radarr import lists, Overseerr, Jellyseerr, Trakt sync tools, or general request systems.
+Driparr is not meant to replace Radarr import lists, Overseerr, Jellyseerr, Trakt sync tools,
+or general request systems.
 
 It is meant for controlled, visible, temporary processing of IMDb CSV exports into Radarr.
 
@@ -236,7 +251,8 @@ For automatic latest builds from `main`, use:
 image: ghcr.io/sander1384/driparr:latest
 ```
 
-Older stacks that still use `ghcr.io/sander1384/seerrdripfeed:latest` are also updated, but new installs should use the `driparr` image name.
+Older stacks that still use `ghcr.io/sander1384/seerrdripfeed:latest` are also updated,
+but new installs should use the `driparr` image name.
 
 Then pull and restart:
 
@@ -280,6 +296,7 @@ docker compose up -d
 
 ## Credits
 
-Driparr was shaped with inspiration from the self-hosted Arr ecosystem and release-page structure from projects such as [Cleanuparr](https://github.com/Cleanuparr/Cleanuparr).
+Driparr was shaped with inspiration from the self-hosted Arr ecosystem and release-page structure
+from projects such as [Cleanuparr](https://github.com/Cleanuparr/Cleanuparr).
 
 It is also a hobby project built with love, fully vibe-coded in Visual Studio Code together with ChatGPT.
