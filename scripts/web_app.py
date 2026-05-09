@@ -8,7 +8,7 @@ import re
 import secrets
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -19,6 +19,7 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
 ASSETS = ROOT / "assets"
+RABBIT_EMOJI = ROOT / "Rabbit Emoji"
 CONFIG_PATH = DATA / "config.json"
 QUEUE_PATH = DATA / "queue.csv"
 QUEUE_FIELDS = ["type", "externalId", "title", "status", "source", "addedAt", "error"]
@@ -28,6 +29,7 @@ LOCK = threading.Lock()
 LAST_RUN = {"at": None, "message": "Worker has not started yet."}
 LAST_EVENTS = []
 LIVEBLOG = []
+AMBIENT_INDEX = 0
 SESSIONS = {}
 SESSION_TTL_SECONDS = 60 * 60 * 12
 MAX_REQUEST_BYTES = 2 * 1024 * 1024
@@ -60,6 +62,49 @@ def minutes_since(value):
     return (datetime.now(timezone.utc) - parsed).total_seconds() / 60
 
 
+def future_time_text(seconds):
+    return (datetime.now(timezone.utc) + timedelta(seconds=max(0, int(seconds)))).strftime("%H:%M")
+
+
+def next_check_text(config):
+    if config.get("app", {}).get("dripMode", "sync") == "sync":
+        seconds = env_sync_poll_seconds()
+    else:
+        seconds = max(1, int(config.get("app", {}).get("intervalMinutes", 60))) * 60
+    minutes = max(1, int(round(seconds / 60)))
+    return f"Ik ga over ongeveer {minutes} minuten opnieuw kijken, rond {future_time_text(seconds)}."
+
+
+RABBIT_MOODS = {
+    "idle": ("020-sleep.svg", "slaperig"),
+    "thinking": ("028-thinking.svg", "nadenkend"),
+    "checking": ("028-thinking.svg", "nadenkend"),
+    "waiting": ("030-worried.svg", "waakzaam"),
+    "adding": ("018-optimistic.svg", "optimistisch"),
+    "added": ("013-laughing.svg", "lachend"),
+    "completed": ("024-happy.svg", "blij"),
+    "skipped": ("013-laughing.svg", "lachend"),
+    "skipped_no_indexer": ("002-annoyed.svg", "geirriteerd"),
+    "failed": ("007-cry.svg", "verdrietig"),
+}
+
+AMBIENT_LIVEBLOG_LINES = [
+    ("De wacht wordt gehouden. Stilte betekent niet dat er geslapen wordt.", "idle"),
+    ("Even de oren gespitst. Nog geen nieuw Radarr-nieuws.", "checking"),
+    ("Wachtrijen zijn best gezellig, zolang niemand voordringt.", "idle"),
+    ("Achter de schermen wordt de boel gladgestreken.", "checking"),
+    ("Kleine statusgedachte: liever langzaam goed dan snel rommelig.", "thinking"),
+    ("De volgende stap krijgt alvast een strenge blik. Vriendelijk streng.", "waiting"),
+    ("Alles staat nog onder controle. Even knipperen en zo weer verder.", "idle"),
+    ("Incomplete downloads horen eerst af te maken. Daar is een duidelijke mening over.", "waiting"),
+]
+
+
+def rabbit_mood_info(mood):
+    filename, label = RABBIT_MOODS.get(str(mood or "").strip().lower(), RABBIT_MOODS["checking"])
+    return {"src": f"/rabbit-emoji/{filename}", "label": label}
+
+
 def push_event(level, title, detail=""):
     LAST_EVENTS.insert(
         0,
@@ -73,15 +118,26 @@ def push_event(level, title, detail=""):
     del LAST_EVENTS[80:]
 
 
-def push_liveblog(message):
+def push_liveblog(message, mood="thinking"):
     LIVEBLOG.insert(
         0,
         {
             "at": utc_now(),
             "message": str(message or ""),
+            "mood": str(mood or "thinking"),
         },
     )
     del LIVEBLOG[80:]
+
+
+def maybe_push_ambient_liveblog():
+    global AMBIENT_INDEX
+    last_at = LIVEBLOG[0].get("at") if LIVEBLOG else None
+    if last_at and (minutes_since(last_at) or 0) < 2:
+        return
+    message, mood = AMBIENT_LIVEBLOG_LINES[AMBIENT_INDEX % len(AMBIENT_LIVEBLOG_LINES)]
+    AMBIENT_INDEX += 1
+    push_liveblog(message, mood)
 
 
 def safe_int(value, default, minimum=None, maximum=None):
@@ -936,7 +992,7 @@ def refresh_completed_items(config, rows):
     changed = False
     for row in active_queue_items(rows):
         if row.get("type") == "movie":
-            push_liveblog(f"Ik ben nu Radarr aan het controleren voor {row['title']}.")
+            push_liveblog(f"Ik ben nu Radarr aan het controleren voor {row['title']}.", "checking")
             status = radarr_movie_status(config, row)
             state = status.get("state")
             reason = str(status.get("reason", "")).strip()
@@ -944,24 +1000,24 @@ def refresh_completed_items(config, rows):
                 row["status"] = "completed"
                 row["error"] = ""
                 changed = True
-                push_liveblog(f"Radarr is klaar met {row['title']}; ik zet hem bij voltooid.")
+                push_liveblog(f"Radarr is klaar met {row['title']}; ik zet hem bij voltooid.", "completed")
                 push_event("completed", row["title"], reason or "Radarr reports the movie file is available")
             elif state == "skipped_no_indexer":
                 row["status"] = "skipped_no_indexer"
                 row["error"] = reason or "Radarr did not grab a release."
                 changed = True
-                push_liveblog(f"Ik kan voor {row['title']} geen bruikbare download vinden. Ik sla deze over en pak zo de volgende.")
+                push_liveblog(f"Ik kan voor {row['title']} geen bruikbare download vinden. Ik sla deze over en pak zo de volgende.", "skipped_no_indexer")
                 push_event("skipped", row["title"], row["error"])
             elif reason:
                 row["error"] = reason
                 changed = True
-                push_liveblog(f"{row['title']} is nog bezig: {reason}")
+                push_liveblog(f"{row['title']} is nog bezig: {reason}", "waiting")
             continue
         if item_is_completed(config, row):
             row["status"] = "completed"
             row["error"] = ""
             changed = True
-            push_liveblog(f"{row['title']} is klaar. Ik ruim mijn wachtrij bij.")
+            push_liveblog(f"{row['title']} is klaar. Ik ruim mijn wachtrij bij.", "completed")
             push_event("completed", row["title"], "Radarr reports the movie file is available")
     return changed
 
@@ -1026,19 +1082,21 @@ def process_once(force=False):
     rows = read_queue()
     changed = False
     drip_mode = config["app"].get("dripMode", "sync")
-    push_liveblog("Ik word wakker en kijk wat er in mijn wachtrij staat.")
+    push_liveblog("Ik word wakker en kijk wat er in mijn wachtrij staat.", "checking")
 
     try:
         if refresh_completed_items(config, rows):
             changed = True
     except RuntimeError as error:
         LAST_RUN.update({"at": utc_now(), "message": f"Sync check error: {error}"})
-        push_liveblog(f"Radarr geeft een fout terug tijdens mijn controle: {error}")
+        push_liveblog(f"Radarr geeft een fout terug tijdens mijn controle: {error}", "failed")
+        push_liveblog(next_check_text(config), "waiting")
         return
 
     active_item = latest_active_item(rows)
     if drip_mode == "sync" and active_item:
-        push_liveblog(f"Ik wacht nog even met de volgende film, want {active_item['title']} is nog niet klaar volgens Radarr.")
+        push_liveblog(f"Ik wacht nog even met de volgende film, want {active_item['title']} is nog niet klaar volgens Radarr.", "waiting")
+        push_liveblog(next_check_text(config), "waiting")
         LAST_RUN.update(
             {
                 "at": utc_now(),
@@ -1055,7 +1113,8 @@ def process_once(force=False):
     selected = [row for row in rows if row["status"] == "todo"][:max_items]
     if not selected:
         LAST_RUN.update({"at": utc_now(), "message": "No todo items."})
-        push_liveblog("Ik heb nu geen nieuwe films klaarstaan. Ik blijf rustig wachten.")
+        push_liveblog("Ik heb nu geen nieuwe films klaarstaan. Ik blijf rustig wachten.", "idle")
+        push_liveblog(next_check_text(config), "idle")
         if changed:
             write_queue(rows)
             if refresh_run_history(config, rows):
@@ -1065,7 +1124,7 @@ def process_once(force=False):
     for item in selected:
         try:
             if item["type"] == "movie":
-                push_liveblog(f"Radarr is oké, ik ga {item['title']} klaarzetten om te downloaden.")
+                push_liveblog(f"Radarr is oké, ik ga {item['title']} klaarzetten om te downloaden.", "adding")
                 payload = radarr_payload(config, item)
                 if radarr_has_tmdb(config, payload["tmdbId"]):
                     item["status"] = "skipped"
@@ -1073,7 +1132,7 @@ def process_once(force=False):
                     item["addedAt"] = utc_now()
                     changed = True
                     LAST_RUN.update({"at": item["addedAt"], "message": f"Skipped (already present): {item['title']}"})
-                    push_liveblog(f"{item['title']} staat al in Radarr. Ik sla hem netjes over.")
+                    push_liveblog(f"{item['title']} staat al in Radarr. Ik sla hem netjes over.", "skipped")
                     push_event("skipped", item["title"], "Already exists in Radarr")
                     continue
                 service_request(config["radarr"], "POST", "/movie", payload)
@@ -1088,7 +1147,7 @@ def process_once(force=False):
                     item["addedAt"] = utc_now()
                     changed = True
                     LAST_RUN.update({"at": item["addedAt"], "message": f"Skipped (already present): {item['title']}"})
-                    push_liveblog(f"{item['title']} staat al in Sonarr. Ik ga door naar wat hierna komt.")
+                    push_liveblog(f"{item['title']} staat al in Sonarr. Ik ga door naar wat hierna komt.", "skipped")
                     push_event("skipped", item["title"], "Already exists in Sonarr")
                     continue
                 service_request(config["sonarr"], "POST", "/series", payload)
@@ -1099,10 +1158,11 @@ def process_once(force=False):
             item["error"] = ""
             changed = True
             LAST_RUN.update({"at": item["addedAt"], "message": f"Added: {item['title']}"})
-            push_liveblog(f"{item['title']} is correct naar Radarr gestuurd en wordt nu door Radarr opgepakt.")
             next_item = next((row for row in rows if row.get("status") == "todo"), None)
             if next_item:
-                push_liveblog(f"De volgende zet ik alvast klaar in mijn hoofd: {next_item['title']}. Eerst laat ik Radarr deze afronden.")
+                push_liveblog(f"De volgende zet ik alvast klaar in mijn hoofd: {next_item['title']}. Eerst laat ik Radarr deze afronden.", "adding")
+            push_liveblog(next_check_text(config), "waiting")
+            push_liveblog(f"{item['title']} is correct naar Radarr gestuurd en wordt nu door Radarr opgepakt.", "added")
             push_event("added", item["title"], "Added to downloader")
         except RuntimeError as error:
             error_text = str(error)
@@ -1112,14 +1172,15 @@ def process_once(force=False):
                 item["addedAt"] = utc_now()
                 changed = True
                 LAST_RUN.update({"at": item["addedAt"], "message": f"Skipped (unresolvable): {item['title']}"})
-                push_liveblog(f"Ik kan {item['title']} niet goed koppelen aan Radarr. Ik sla hem over zodat de wachtrij doorloopt.")
+                push_liveblog(f"Ik kan {item['title']} niet goed koppelen aan Radarr. Ik sla hem over zodat de wachtrij doorloopt.", "skipped_no_indexer")
                 push_event("skipped", item["title"], "Unresolvable IMDb mapping")
             else:
                 item["status"] = "failed"
                 item["error"] = error_text
                 changed = True
                 LAST_RUN.update({"at": utc_now(), "message": f"Error for {item['title']}: {error}"})
-                push_liveblog(f"Er ging iets mis met {item['title']}: {error_text}")
+                push_liveblog(f"Er ging iets mis met {item['title']}: {error_text}", "failed")
+                push_liveblog(next_check_text(config), "waiting")
                 push_event("failed", item["title"], error_text)
                 try:
                     send_webhook_notification(config, "run_failed", item["title"], error_text, {"externalId": item.get("externalId", "")})
@@ -1219,7 +1280,7 @@ def settings_form(name, values, include_actions=True):
     return f"""<div class="panel service-form"><div class="service-grid">
 <div class="service-row"><label>Enabled</label><label class="switch"><input id="{name}Enabled" class="switch-input" type="checkbox" {checked}><span class="switch-slider"></span></label></div>
 <div class="service-row"><label>URL *</label><input id="{name}Url" value="{html.escape(values.get('url',''))}" placeholder="http://radarr:7878"><div id="{name}UrlError" class="field-error"></div></div>
-<div class="service-row"><label>API key *</label><input id="{name}ApiKey" value="{html.escape(values.get('apiKey',''))}" placeholder="API key"><div id="{name}ApiKeyError" class="field-error"></div><div class="conn-inline"><span id="{name}ConnIndicator" class="conn-indicator"><span class="conn-dot"></span><span id="{name}ConnText">Not tested yet</span></span><button class="btn secondary" type="button" onclick="quickCheckService('{name}')">Check now</button></div></div>
+<div class="service-row"><label>API key *</label><input id="{name}ApiKey" type="password" autocomplete="off" value="{html.escape(values.get('apiKey',''))}" placeholder="API key"><div id="{name}ApiKeyError" class="field-error"></div><div class="conn-inline"><span id="{name}ConnIndicator" class="conn-indicator"><span class="conn-dot"></span><span id="{name}ConnText">Not tested yet</span></span><button class="btn secondary" type="button" onclick="quickCheckService('{name}')">Check now</button></div></div>
 {quality_field}
 <div class="service-row"><label>Root Folder</label><input id="{name}Root" value="{html.escape(values.get('rootFolderPath',''))}" placeholder="/movies"></div>
 </div>{actions}</div>"""
@@ -1342,6 +1403,7 @@ def page(config, queue):
         f"<li><small>{html.escape(format_time_only(entry.get('at')))}</small><span>{html.escape(entry.get('message',''))}</span></li>"
         for entry in LIVEBLOG[:12]
     ) or "<li><small>--:--</small><span>Ik sta klaar. Zet de worker aan en ik begin met Radarr controleren.</span></li>"
+    rabbit_mood = rabbit_mood_info(LIVEBLOG[0].get("mood") if LIVEBLOG else "idle")
     current_progress_html = (
         f"<div class='progress-wrap'><div class='progress-label'>{html.escape(progress_status)} {html.escape(current_eta)}</div><div class='progress-track'><div class='progress-fill' style='width:{int(progress_percent)}%'></div></div></div>"
         if current_item and isinstance(progress_percent, int)
@@ -1426,6 +1488,10 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 .liveblog-list li {{ justify-content:flex-start; align-items:flex-start; }}
 .liveblog-list li small {{ flex:0 0 54px; color:#8fb7ff; font-weight:700; }}
 .liveblog-list li span {{ white-space:normal; overflow:visible; text-overflow:clip; line-height:1.35; }}
+.liveblog-head {{ display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:start; gap:12px; }}
+.liveblog-head h3 {{ margin:0; }}
+.rabbit-mood {{ width:40px; min-width:40px; height:40px; display:grid; place-items:center; align-self:start; margin-top:1px; }}
+.rabbit-mood img {{ width:36px; height:36px; object-fit:contain; filter:invert(93%) sepia(14%) saturate(773%) hue-rotate(207deg) brightness(105%) contrast(102%); }}
 .drip-card {{ padding:0; overflow:hidden; }}
 .drip-header {{ display:flex; justify-content:space-between; align-items:center; padding:14px 16px; border-bottom:1px solid #2e244a; }}
 .drip-stats {{ color:#d2c7f6; font-size:13px; font-weight:700; }}
@@ -1596,7 +1662,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
   </div>
 </div>
 <div class=\"dashboard-grid\">
-<div class=\"panel liveblog-panel\"><h3 style=\"margin-top:0\">Driparr liveblog</h3><p class=\"sub\">Ik vertel hier live wat ik achter de schermen aan het doen ben.</p><div class=\"feed-list liveblog-list\"><ul>{liveblog_rows}</ul></div></div>
+<div class=\"panel liveblog-panel\"><div class=\"liveblog-head\"><div><h3>Driparr liveblog</h3><p class=\"sub\" style=\"margin-bottom:10px\">Ik vertel hier live wat ik achter de schermen aan het doen ben.</p></div><div class=\"rabbit-mood\" title=\"Driparr voelt zich {html.escape(rabbit_mood['label'])}\"><img id=\"rabbitMoodImg\" src=\"{html.escape(rabbit_mood['src'])}\" data-mood=\"{html.escape(LIVEBLOG[0].get('mood') if LIVEBLOG else 'idle')}\" alt=\"Driparr rabbit mood: {html.escape(rabbit_mood['label'])}\"></div></div><div class=\"feed-list liveblog-list\"><ul id=\"liveblogRows\">{liveblog_rows}</ul></div></div>
 <div class=\"panel\"><h3 style=\"margin-top:0\">Recent Events</h3><p class=\"sub\">What Driparr has done recently.</p><div class=\"feed-list\"><ul>{event_rows}</ul></div></div>
 <div class=\"panel\"><h3 style=\"margin-top:0\" data-i18n=\"already_library\">Already in Library</h3><p class=\"sub\" data-i18n=\"already_library_sub\">Automatically skipped to prevent duplicates.</p><div class=\"feed-list\"><ul>{skipped_rows}</ul></div></div>
 <div class=\"panel\"><h3 style=\"margin-top:0\">Skipped: No Release</h3><p class=\"sub\">Radarr searched but did not grab a release, or reported no usable indexer.</p><div class=\"feed-list\"><ul>{no_indexer_rows}</ul></div></div>
@@ -1610,7 +1676,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 </main></div>
 <div id=\"radarrModal\" class=\"modal-backdrop\"><div class=\"modal-card\"><div class=\"modal-head\"><b>Add Instance</b><button class=\"modal-close\" onclick=\"closeModal('radarrModal')\">×</button></div><div class=\"modal-body\">{settings_form('radarr', config['radarr'], include_actions=False)}</div><div class=\"modal-foot\"><button class=\"btn secondary\" onclick=\"testService('radarr')\">Test</button><button class=\"btn\" onclick=\"saveService('radarr')\">Save</button></div></div></div>
 <div id=\"sonarrModal\" class=\"modal-backdrop\"><div class=\"modal-card\"><div class=\"modal-head\"><b>Add Instance</b><button class=\"modal-close\" onclick=\"closeModal('sonarrModal')\">×</button></div><div class=\"modal-body\">{settings_form('sonarr', config['sonarr'], include_actions=False)}</div><div class=\"modal-foot\"><button class=\"btn secondary\" onclick=\"testService('sonarr')\">Test</button><button class=\"btn\" onclick=\"saveService('sonarr')\">Save</button></div></div></div>
-<div id=\"onboardingModal\" class=\"modal-backdrop{' open' if show_onboarding else ''}\"><div class=\"modal-card\"><div class=\"modal-head\"><b data-i18n=\"onboarding_title\">Quick Start Checklist</b><button class=\"modal-close\" onclick=\"dismissOnboarding()\">×</button></div><div class=\"modal-body\"><p class=\"sub\" data-i18n=\"onboarding_sub\">Follow these steps once and you're ready.</p><ol class=\"onboarding-list\"><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-link\" src=\"/assets/link.svg\" alt=\"link\"><span data-i18n=\"onboarding_1\">Connect Radarr.</span></div><span class=\"onb-check {'done' if step1_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-add\" src=\"/assets/add.svg\" alt=\"add\"><span data-i18n=\"onboarding_2\">Import an IMDb CSV list.</span></div><span class=\"onb-check {'done' if step2_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-drip\" src=\"/assets/water-drop.svg\" alt=\"drip\"><span data-i18n=\"onboarding_3\">Choose drip mode (timed or sync) and interval.</span></div><span class=\"onb-check {'done' if step3_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-toggle\" src=\"/assets/toggle.svg\" alt=\"toggle\"><span data-i18n=\"onboarding_4\">Enable worker and monitor the timeline.</span></div><span class=\"onb-check {'done' if step4_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li></ol><div class=\"onboarding-setup\"><div class=\"grid\"><div><label>Radarr URL *</label><input id=\"obRadarrUrl\" value=\"{html.escape(config.get('radarr', {}).get('url',''))}\" placeholder=\"http://radarr:7878\"><div id=\"obRadarrUrlError\" class=\"field-error\"></div></div><div><label>Radarr API key *</label><input id=\"obRadarrApi\" value=\"{html.escape(config.get('radarr', {}).get('apiKey',''))}\" placeholder=\"API key\"><div id=\"obRadarrApiError\" class=\"field-error\"></div></div></div><div class=\"grid\"><div><label>Quality Profile</label><select id=\"obRadarrQuality\" disabled><option value=\"\">Test first...</option></select><div id=\"obQualityStatus\" class=\"ob-status\">Test the connection first to fetch profiles.</div></div><div class=\"ob-inline\"><button class=\"btn secondary\" type=\"button\" onclick=\"testOnboardingRadarr()\">Test</button></div></div></div><p class=\"slogan\" data-i18n=\"set_and_forget\">Set and forget.</p></div><div class=\"modal-foot\"><span></span><button class=\"btn onboarding-save\" onclick=\"saveOnboardingSetup()\">Save</button></div></div></div>
+<div id=\"onboardingModal\" class=\"modal-backdrop{' open' if show_onboarding else ''}\"><div class=\"modal-card\"><div class=\"modal-head\"><b data-i18n=\"onboarding_title\">Quick Start Checklist</b><button class=\"modal-close\" onclick=\"dismissOnboarding()\">×</button></div><div class=\"modal-body\"><p class=\"sub\" data-i18n=\"onboarding_sub\">Follow these steps once and you're ready.</p><ol class=\"onboarding-list\"><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-link\" src=\"/assets/link.svg\" alt=\"link\"><span data-i18n=\"onboarding_1\">Connect Radarr.</span></div><span class=\"onb-check {'done' if step1_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-add\" src=\"/assets/add.svg\" alt=\"add\"><span data-i18n=\"onboarding_2\">Import an IMDb CSV list.</span></div><span class=\"onb-check {'done' if step2_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-drip\" src=\"/assets/water-drop.svg\" alt=\"drip\"><span data-i18n=\"onboarding_3\">Choose drip mode (timed or sync) and interval.</span></div><span class=\"onb-check {'done' if step3_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-toggle\" src=\"/assets/toggle.svg\" alt=\"toggle\"><span data-i18n=\"onboarding_4\">Enable worker and monitor the timeline.</span></div><span class=\"onb-check {'done' if step4_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li></ol><div class=\"onboarding-setup\"><div class=\"grid\"><div><label>Radarr URL *</label><input id=\"obRadarrUrl\" value=\"{html.escape(config.get('radarr', {}).get('url',''))}\" placeholder=\"http://radarr:7878\"><div id=\"obRadarrUrlError\" class=\"field-error\"></div></div><div><label>Radarr API key *</label><input id=\"obRadarrApi\" type=\"password\" autocomplete=\"off\" value=\"{html.escape(config.get('radarr', {}).get('apiKey',''))}\" placeholder=\"API key\"><div id=\"obRadarrApiError\" class=\"field-error\"></div></div></div><div class=\"grid\"><div><label>Quality Profile</label><select id=\"obRadarrQuality\" disabled><option value=\"\">Test first...</option></select><div id=\"obQualityStatus\" class=\"ob-status\">Test the connection first to fetch profiles.</div></div><div class=\"ob-inline\"><button class=\"btn secondary\" type=\"button\" onclick=\"testOnboardingRadarr()\">Test</button></div></div></div><p class=\"slogan\" data-i18n=\"set_and_forget\">Set and forget.</p></div><div class=\"modal-foot\"><span></span><button class=\"btn onboarding-save\" onclick=\"saveOnboardingSetup()\">Save</button></div></div></div>
 <div id=\"toast\" class=\"toast\"></div>
 <script>
 function openTab(tabId) {{ document.querySelectorAll('nav button').forEach(b => b.classList.remove('active')); document.querySelectorAll('.tab').forEach(t => t.classList.remove('active')); const btn = document.querySelector(`nav button[data-tab="${{tabId}}"]`); if (btn) btn.classList.add('active'); const tab = document.getElementById(tabId); if (tab) tab.classList.add('active'); }}
@@ -1622,6 +1688,73 @@ function openModal(id) {{
   if (id === 'sonarrModal') wireServiceHealth('sonarr');
 }}
 function closeModal(id) {{ const m=document.getElementById(id); if (m) m.classList.remove('open'); }}
+const rabbitMoodAssets = {{
+  idle:'020-sleep.svg', thinking:'028-thinking.svg', checking:'028-thinking.svg', waiting:'030-worried.svg',
+  adding:'018-optimistic.svg', added:'013-laughing.svg', completed:'024-happy.svg',
+  skipped:'013-laughing.svg', skipped_no_indexer:'002-annoyed.svg', failed:'007-cry.svg'
+}};
+const rabbitMoodLabels = {{
+  idle:'slaperig', thinking:'nadenkend', checking:'nadenkend', waiting:'waakzaam',
+  adding:'optimistisch', added:'lachend', completed:'blij',
+  skipped:'lachend', skipped_no_indexer:'geirriteerd', failed:'verdrietig'
+}};
+const rabbitIdleFaces = [
+  ['003-bored.svg','verveeld'], ['006-cool.svg','cool'], ['010-grimacing.svg','ongemakkelijk'],
+  ['012-laugh.svg','grinnikend'], ['013-laughing.svg','lachend'], ['015-mocking.svg','plagerig'],
+  ['016-mocking.svg','eigenwijs'], ['017-mocking.svg','brutaal'], ['018-optimistic.svg','optimistisch'],
+  ['020-sleep.svg','slaperig'], ['022-smile.svg','tevreden'], ['024-happy.svg','blij'],
+  ['025-happy.svg','vrolijk'], ['027-surprised.svg','verrast']
+];
+let rabbitIdleIndex = 0;
+let lastLiveblogSignature = '';
+function setRabbitFace(src, label, mood) {{
+  const img = document.getElementById('rabbitMoodImg');
+  if (!img) return;
+  const holder = img.closest('.rabbit-mood');
+  img.src = `/rabbit-emoji/${{src}}`;
+  img.dataset.mood = mood || label || '';
+  img.alt = `Driparr rabbit mood: ${{label}}`;
+  if (holder) holder.title = `Driparr voelt zich ${{label}}`;
+}}
+function startRabbitMoodLoop() {{
+  setInterval(() => {{
+    rabbitIdleIndex = (rabbitIdleIndex + 1) % rabbitIdleFaces.length;
+    const face = rabbitIdleFaces[rabbitIdleIndex];
+    setRabbitFace(face[0], face[1], `ambient-${{face[0]}}`);
+  }}, 60000);
+}}
+function updateRabbitMood(mood, force=false) {{
+  if (!mood) return;
+  const img = document.getElementById('rabbitMoodImg');
+  if (!img) return;
+  if (!force && img.dataset.mood === mood) return;
+  setRabbitFace(rabbitMoodAssets[mood] || rabbitMoodAssets.checking, rabbitMoodLabels[mood] || rabbitMoodLabels.checking, mood);
+}}
+function escapeHtml(value) {{
+  return String(value).replace(/[&<>"']/g, (char) => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[char]));
+}}
+function renderLiveblog(entries) {{
+  const list = document.getElementById('liveblogRows');
+  if (!list || !Array.isArray(entries)) return;
+  list.innerHTML = entries.map((entry) => {{
+    const time = String(entry.time || '--:--');
+    const message = String(entry.message || '');
+    return `<li><small>${{escapeHtml(time)}}</small><span>${{escapeHtml(message)}}</span></li>`;
+  }}).join('') || '<li><small>--:--</small><span>Ik sta klaar. Zet de worker aan en ik begin met Radarr controleren.</span></li>';
+}}
+async function pollLiveblog() {{
+  try {{
+    const response = await fetch('/api/liveblog', {{headers:{{Accept:'application/json'}}}});
+    if (!response.ok) return;
+    const data = await response.json();
+    renderLiveblog(data.entries || []);
+    const first = (data.entries || [])[0] || {{}};
+    const signature = `${{first.time || ''}}|${{first.message || ''}}|${{data.mood || 'idle'}}`;
+    const hasNewMessage = signature && signature !== lastLiveblogSignature;
+    lastLiveblogSignature = signature;
+    updateRabbitMood(data.mood || 'idle', hasNewMessage);
+  }} catch (e) {{}}
+}}
 function detectLanguage() {{
   const forcedLang = '{env_force_language()}';
   if (forcedLang) return forcedLang;
@@ -2203,6 +2336,9 @@ if (languagePref) {{
 }}
 async function logout() {{ await post('/api/logout', {{}}); location.href='/login'; }}
 applyI18n();
+startRabbitMoodLoop();
+pollLiveblog();
+setInterval(pollLiveblog, 5000);
 (() => {{
   const next = localStorage.getItem('driparr_next_step');
   if (next === 'lists') {{
@@ -2274,6 +2410,19 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path
+        if path.startswith("/rabbit-emoji/"):
+            asset_name = Path(path.replace("/rabbit-emoji/", "", 1)).name
+            asset_path = RABBIT_EMOJI / asset_name
+            if asset_path.exists() and asset_path.is_file() and asset_path.suffix.lower() == ".svg":
+                payload = asset_path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/svg+xml")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+            else:
+                self.respond(404, "Not found", "text/plain")
+            return
         if path.startswith("/assets/"):
             asset_name = Path(path.replace("/assets/", "", 1)).name
             asset_path = ASSETS / asset_name
@@ -2297,6 +2446,19 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(200, login_page())
             return
         if self.auth_required():
+            return
+        if path == "/api/liveblog":
+            maybe_push_ambient_liveblog()
+            mood = LIVEBLOG[0].get("mood") if LIVEBLOG else "idle"
+            entries = [
+                {
+                    "time": format_time_only(entry.get("at")),
+                    "message": entry.get("message", ""),
+                    "mood": entry.get("mood", "checking"),
+                }
+                for entry in LIVEBLOG[:12]
+            ]
+            self.respond(200, json.dumps({"ok": True, "mood": mood, "entries": entries}), "application/json")
             return
         if path == "/setup":
             self.respond(302, "", location="/")

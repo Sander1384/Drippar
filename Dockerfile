@@ -5,6 +5,7 @@ WORKDIR /app
 COPY scripts ./scripts
 COPY data ./data
 COPY assets ./assets
+COPY ["Rabbit Emoji", "./Rabbit Emoji"]
 COPY README.md ./README.md
 
 EXPOSE 8080
