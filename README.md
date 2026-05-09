@@ -86,7 +86,7 @@ Create `docker-compose.yml`:
 ```yaml
 services:
   driparr:
-    image: ghcr.io/sander1384/driparr:v0.1.1
+    image: ghcr.io/sander1384/driparr:v0.1.6
     container_name: driparr
     restart: unless-stopped
     ports:
@@ -227,7 +227,7 @@ docker compose up -d
 
 ## Links
 
-- [Latest release](https://github.com/Sander1384/Drippar/releases/tag/v0.1.1)
+- [Latest release](https://github.com/Sander1384/Drippar/releases/tag/v0.1.6)
 - [Container image](https://github.com/Sander1384/Drippar/pkgs/container/driparr)
 - [Docker workflow](https://github.com/Sander1384/Drippar/actions/workflows/docker-publish.yml)
 

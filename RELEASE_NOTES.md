@@ -1,6 +1,6 @@
-# Driparr v0.1.1
+# Driparr v0.1.6
 
-Small public-page cleanup release for Driparr: the container image now uses the Driparr package name and the README uses the app rabbit logo.
+Liveblog rabbit mood UI release for Driparr.
 
 ## Highlights
 
@@ -13,6 +13,10 @@ Small public-page cleanup release for Driparr: the container image now uses the 
 - Run history and optional webhook notifications.
 - Docker Compose and Portainer-ready deployment examples.
 - Mock Radarr test stack for browser testing without a real Radarr instance.
+- Driparr liveblog with synced rabbit mood icon and dynamic hover text.
+- Rabbit idle mood changes once per minute.
+- Spontaneous liveblog notes appear at most once per two minutes.
+- Radarr/Sonarr API keys are masked in the UI.
 
 ## Install
 
@@ -21,7 +25,7 @@ Create a data folder and a `docker-compose.yml`:
 ```yaml
 services:
   driparr:
-    image: ghcr.io/sander1384/driparr:v0.1.1
+    image: ghcr.io/sander1384/driparr:v0.1.6
     container_name: driparr
     restart: unless-stopped
     ports:
