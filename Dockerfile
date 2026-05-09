@@ -1,7 +1,7 @@
-﻿FROM python:3.12-alpine
+FROM python:3.12-alpine
 
 WORKDIR /app
-ENV DRIPARR_VERSION=0.1.12
+ENV DRIPARR_VERSION=0.1.13
 
 COPY scripts ./scripts
 COPY data ./data

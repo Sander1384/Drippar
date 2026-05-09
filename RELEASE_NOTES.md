@@ -1,8 +1,8 @@
-# Driparr v0.1.12
+# Driparr v0.1.13
 
-Radarr visibility and live dashboard refresh release for Driparr.
+Radarr red queue detection release for Driparr.
 
-This release improves Radarr live status reporting, skips items when Radarr cannot find a usable download after a grace period, respects external Radarr downloads before adding new Driparr items, and refreshes the dashboard timeline and queue without pressing F5.
+This release makes Driparr treat Radarr red/warning/failed/stalled/import-blocked queue entries as failed downloads, so the item is skipped instead of waiting forever. It also keeps the live Radarr status, external-download protection, and dashboard refresh improvements from the previous build.
 
 ## Highlights
 
@@ -27,7 +27,7 @@ Create a data folder and a `docker-compose.yml`:
 ```yaml
 services:
   driparr:
-    image: ghcr.io/sander1384/driparr:v0.1.12
+    image: ghcr.io/sander1384/driparr:v0.1.13
     container_name: driparr
     restart: unless-stopped
     ports:

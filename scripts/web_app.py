@@ -34,7 +34,7 @@ SESSIONS = {}
 SESSION_TTL_SECONDS = 60 * 60 * 12
 MAX_REQUEST_BYTES = 2 * 1024 * 1024
 MAX_CSV_CHARS = 2 * 1024 * 1024
-APP_VERSION_FALLBACK = "0.1.12"
+APP_VERSION_FALLBACK = "0.1.13"
 
 
 def detect_app_version():
@@ -844,6 +844,74 @@ def queue_entry_is_complete(entry):
     return False
 
 
+def queue_entry_problem_reason(entry):
+    if not isinstance(entry, dict):
+        return ""
+    fields = {
+        "status": entry.get("status"),
+        "trackedDownloadState": entry.get("trackedDownloadState"),
+        "trackedDownloadStatus": entry.get("trackedDownloadStatus"),
+        "downloadClientStatus": entry.get("downloadClientStatus"),
+    }
+    bad_values = {
+        "warning",
+        "warn",
+        "failed",
+        "failure",
+        "error",
+        "errored",
+        "aborted",
+        "cancelled",
+        "canceled",
+        "importblocked",
+        "import block",
+        "importfailed",
+        "downloadfailed",
+        "missing",
+        "stalled",
+    }
+    for label, value in fields.items():
+        normalized = str(value or "").strip().lower().replace(" ", "")
+        if normalized in {v.replace(" ", "") for v in bad_values}:
+            return f"Radarr queue {label}: {value}."
+
+    messages = []
+    for key in ("statusMessages", "errorMessage", "message", "warningMessage", "lastMessage"):
+        value = entry.get(key)
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    text = item.get("message") or item.get("title") or item.get("description")
+                    if text:
+                        messages.append(str(text))
+                    for nested in item.get("messages") or []:
+                        if nested:
+                            messages.append(str(nested))
+                elif item:
+                    messages.append(str(item))
+        elif value:
+            messages.append(str(value))
+    problem_words = (
+        "warning",
+        "failed",
+        "error",
+        "not importable",
+        "import failed",
+        "no files",
+        "missing",
+        "stalled",
+        "unavailable",
+        "rejected",
+        "download wasn't grabbed",
+        "download was not grabbed",
+        "not found",
+    )
+    for message in messages:
+        if text_contains_any(message, problem_words):
+            return f"Radarr queue meldt: {message}"
+    return ""
+
+
 def queue_entry_progress_text(entry):
     if not isinstance(entry, dict):
         return ""
@@ -907,7 +975,7 @@ def external_radarr_queue_entry(config, rows):
         return None
     own_movie_ids = active_radarr_movie_ids_for_rows(config, rows)
     for entry in radarr_queue_records(config):
-        if not isinstance(entry, dict) or queue_entry_is_complete(entry):
+        if not isinstance(entry, dict) or queue_entry_problem_reason(entry) or queue_entry_is_complete(entry):
             continue
         movie_id = entry.get("movieId")
         nested = entry.get("movie")
@@ -1071,16 +1139,22 @@ def radarr_movie_status(config, item):
 
     queue_entry = queue_entry_for_movie(radarr_queue_records(config), movie)
     if queue_entry:
+        problem_reason = queue_entry_problem_reason(queue_entry)
+        if problem_reason:
+            return {
+                "state": "skipped_no_indexer",
+                "reason": f"Radarr markeert de download als probleem. {problem_reason}",
+            }
         if queue_entry_is_complete(queue_entry):
             return {"state": "active", "reason": "Radarr meldt dat de download klaar is; ik wacht op import."}
         progress = queue_entry_progress_text(queue_entry)
         return {"state": "active", "reason": f"Radarr heeft een actieve download in de queue{': ' + progress if progress else ''}."}
 
     history = radarr_history_records(config, movie.get("id"))
-    if history_has_grab_or_import(history):
-        return {"state": "active", "reason": "Radarr heeft een release gegrepen; ik wacht op download- of importstatus."}
     if history_has_failed_download(history):
         return {"state": "skipped_no_indexer", "reason": "Radarr meldt dat de download is mislukt of genegeerd."}
+    if history_has_grab_or_import(history):
+        return {"state": "active", "reason": "Radarr heeft een release gegrepen; ik wacht op download- of importstatus."}
 
     command_state, command = movie_search_command_state(radarr_command_records(config), movie)
     if command_state == "running":
