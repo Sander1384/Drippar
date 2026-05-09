@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   driparr:
-    image: ghcr.io/sander1384/driparr:v0.1.11
+    image: ghcr.io/sander1384/driparr:v0.1.12
     container_name: driparr-app
     restart: unless-stopped
     ports:

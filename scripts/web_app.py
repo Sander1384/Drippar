@@ -34,6 +34,7 @@ SESSIONS = {}
 SESSION_TTL_SECONDS = 60 * 60 * 12
 MAX_REQUEST_BYTES = 2 * 1024 * 1024
 MAX_CSV_CHARS = 2 * 1024 * 1024
+APP_VERSION_FALLBACK = "0.1.12"
 
 
 def detect_app_version():
@@ -56,7 +57,7 @@ def detect_app_version():
             return match.group(1)
     except Exception:
         pass
-    return "dev"
+    return APP_VERSION_FALLBACK
 
 
 APP_VERSION = detect_app_version()
