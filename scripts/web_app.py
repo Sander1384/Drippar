@@ -110,9 +110,9 @@ def env_force_language():
 
 def env_sync_poll_seconds():
     try:
-        return max(10, int(os.getenv("DRIPARR_SYNC_POLL_SECONDS", "60") or "60"))
+        return max(60, int(os.getenv("DRIPARR_SYNC_POLL_SECONDS", "600") or "600"))
     except ValueError:
-        return 60
+        return 600
 
 
 def hash_password(password, salt):
@@ -148,7 +148,7 @@ def default_config():
     return {
         "app": {
             "setupComplete": False,
-            "intervalMinutes": 60,
+            "intervalMinutes": 10,
             "maxItemsPerRun": 1,
             "workerEnabled": False,
             "dripMode": "sync",
@@ -700,10 +700,7 @@ def movie_is_completed_in_radarr(config, item):
     movie = find_movie_by_tmdb(movies, tmdb_id)
     if not movie:
         return False
-    if bool(movie.get("hasFile")) or bool(movie.get("movieFile")):
-        return True
-    queue_entry = queue_entry_for_movie(radarr_queue_records(config), movie)
-    return queue_entry_is_complete(queue_entry)
+    return bool(movie.get("hasFile")) or bool(movie.get("movieFile"))
 
 
 def series_is_completed_in_sonarr(config, item):
@@ -1315,7 +1312,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 <section id=\"queue\" class=\"tab\"><h1>Queue</h1><p class=\"sub\">All items and statuses.</p><div class=\"panel\"><div class=\"queue-wrap\"><table><thead><tr><th>Type</th><th>Title</th><th>ID</th><th>Status</th><th>Source</th><th>Reason</th></tr></thead><tbody>{queue_rows}</tbody></table></div></div></section>
 <section id=\"radarr\" class=\"tab\"><h1>Radarr <span>Settings</span></h1><p class=\"sub\">Manage your Radarr instances</p><div class=\"panel\"><div class=\"instance-title\" style=\"margin-bottom:12px\">Instances</div><div class=\"instance-card\"><div><b>Radarr</b> <span class=\"{'enabled-pill' if config['radarr'].get('enabled') else 'disabled-pill'}\">{'Enabled' if config['radarr'].get('enabled') else 'Disabled'}</span> <span style=\"color:#9f92c9;margin-left:10px\">{html.escape(config['radarr'].get('url',''))}</span></div><div class=\"instance-actions\"><button class=\"btn\" onclick=\"openModal('radarrModal')\">Add / Edit Instance</button><button class=\"btn secondary\" onclick=\"testService('radarr')\">Test</button></div></div></div></section>
 <section id=\"sonarr\" class=\"tab\"><h1>Sonarr <span>Settings</span></h1><p class=\"sub\">Manage your Sonarr instances</p><div class=\"panel\"><div class=\"instance-title\" style=\"margin-bottom:12px\">Instances</div><div class=\"instance-card\"><div><b>Sonarr</b> <span class=\"{'enabled-pill' if config['sonarr'].get('enabled') else 'disabled-pill'}\">{'Enabled' if config['sonarr'].get('enabled') else 'Disabled'}</span> <span style=\"color:#9f92c9;margin-left:10px\">{html.escape(config['sonarr'].get('url',''))}</span></div><div class=\"instance-actions\"><button class=\"btn\" onclick=\"openModal('sonarrModal')\">Add / Edit Instance</button><button class=\"btn secondary\" onclick=\"testService('sonarr')\">Test</button></div></div></div></section>
-<section id=\"general\" class=\"tab\"><h1 data-i18n=\"general\">General</h1><div class=\"panel\"><div class=\"grid\"><div><label data-i18n=\"drip_mode\">Drip mode</label><select id=\"dripMode\"><option value=\"timed\" data-i18n=\"drip_mode_timed\">Timed (interval based)</option><option value=\"sync\" data-i18n=\"drip_mode_sync\">Sync (wait for completion)</option></select></div><div><label id=\"intervalPresetLabel\" data-i18n=\"drip_interval\">Drip interval</label><select id=\"intervalPreset\" onchange=\"setIntervalFromPreset()\"><option value=\"15\" data-i18n=\"every_15\">Every 15 minutes</option><option value=\"30\" data-i18n=\"every_30\">Every 30 minutes</option><option value=\"60\" data-i18n=\"every_60\">Every hour</option><option value=\"90\" data-i18n=\"every_90\">Every 1.5 hours</option><option value=\"custom\" data-i18n=\"custom\">Custom</option></select></div><div><label id=\"intervalMinutesLabel\" data-i18n=\"interval_custom\">Interval minutes (custom)</label><input id=\"intervalMinutes\" type=\"number\" value=\"{config['app'].get('intervalMinutes')}\"></div><div><label data-i18n=\"max_items\">Max items per run</label><input id=\"maxItemsPerRun\" type=\"number\" value=\"{config['app'].get('maxItemsPerRun')}\"></div><div><label>Webhook notifications</label><label class=\"switch\"><input id=\"notifyEnabled\" class=\"switch-input\" type=\"checkbox\" {'checked' if config['app'].get('notifyEnabled', False) else ''}><span class=\"switch-slider\"></span></label></div><div><label>Webhook URL</label><input id=\"notifyWebhookUrl\" value=\"{html.escape(config['app'].get('notifyWebhookUrl',''))}\" placeholder=\"https://example.com/webhook\"></div><div><label data-i18n=\"language\">Language</label><select id=\"languagePref\"><option value=\"auto\" data-i18n=\"language_auto\">Auto (system)</option><option value=\"en\">English</option><option value=\"nl\">Nederlands</option><option value=\"de\">Deutsch</option></select></div></div><div class=\"actions\"><button class=\"btn\" onclick=\"saveGeneral()\" data-i18n=\"save\">Save</button><button class=\"btn secondary\" onclick=\"testNotification()\">Test notification</button><button class=\"btn secondary\" onclick=\"showOnboardingAgain()\" data-i18n=\"show_checklist\">Show checklist</button></div></div></section>
+<section id=\"general\" class=\"tab\"><h1 data-i18n=\"general\">General</h1><div class=\"panel\"><div class=\"grid\"><div><label data-i18n=\"drip_mode\">Drip mode</label><select id=\"dripMode\"><option value=\"timed\" data-i18n=\"drip_mode_timed\">Timed (interval based)</option><option value=\"sync\" data-i18n=\"drip_mode_sync\">Sync (wait for completion)</option></select></div><div><label id=\"intervalPresetLabel\" data-i18n=\"drip_interval\">Drip interval</label><select id=\"intervalPreset\" onchange=\"setIntervalFromPreset()\"><option value=\"10\">Every 10 minutes</option><option value=\"15\" data-i18n=\"every_15\">Every 15 minutes</option><option value=\"30\" data-i18n=\"every_30\">Every 30 minutes</option><option value=\"60\" data-i18n=\"every_60\">Every hour</option><option value=\"90\" data-i18n=\"every_90\">Every 1.5 hours</option><option value=\"custom\" data-i18n=\"custom\">Custom</option></select></div><div><label id=\"intervalMinutesLabel\" data-i18n=\"interval_custom\">Interval minutes (custom)</label><input id=\"intervalMinutes\" type=\"number\" value=\"{config['app'].get('intervalMinutes')}\"></div><div><label data-i18n=\"max_items\">Max items per run</label><input id=\"maxItemsPerRun\" type=\"number\" value=\"{config['app'].get('maxItemsPerRun')}\"></div><div><label>Webhook notifications</label><label class=\"switch\"><input id=\"notifyEnabled\" class=\"switch-input\" type=\"checkbox\" {'checked' if config['app'].get('notifyEnabled', False) else ''}><span class=\"switch-slider\"></span></label></div><div><label>Webhook URL</label><input id=\"notifyWebhookUrl\" value=\"{html.escape(config['app'].get('notifyWebhookUrl',''))}\" placeholder=\"https://example.com/webhook\"></div><div><label data-i18n=\"language\">Language</label><select id=\"languagePref\"><option value=\"auto\" data-i18n=\"language_auto\">Auto (system)</option><option value=\"en\">English</option><option value=\"nl\">Nederlands</option><option value=\"de\">Deutsch</option></select></div></div><div class=\"actions\"><button class=\"btn\" onclick=\"saveGeneral()\" data-i18n=\"save\">Save</button><button class=\"btn secondary\" onclick=\"testNotification()\">Test notification</button><button class=\"btn secondary\" onclick=\"showOnboardingAgain()\" data-i18n=\"show_checklist\">Show checklist</button></div></div></section>
 </main></div>
 <div id=\"radarrModal\" class=\"modal-backdrop\"><div class=\"modal-card\"><div class=\"modal-head\"><b>Add Instance</b><button class=\"modal-close\" onclick=\"closeModal('radarrModal')\">×</button></div><div class=\"modal-body\">{settings_form('radarr', config['radarr'], include_actions=False)}</div><div class=\"modal-foot\"><button class=\"btn secondary\" onclick=\"testService('radarr')\">Test</button><button class=\"btn\" onclick=\"saveService('radarr')\">Save</button></div></div></div>
 <div id=\"sonarrModal\" class=\"modal-backdrop\"><div class=\"modal-card\"><div class=\"modal-head\"><b>Add Instance</b><button class=\"modal-close\" onclick=\"closeModal('sonarrModal')\">×</button></div><div class=\"modal-body\">{settings_form('sonarr', config['sonarr'], include_actions=False)}</div><div class=\"modal-foot\"><button class=\"btn secondary\" onclick=\"testService('sonarr')\">Test</button><button class=\"btn\" onclick=\"saveService('sonarr')\">Save</button></div></div></div>
@@ -1687,7 +1684,7 @@ function updateDripModeUI() {{
   if (presetLabel) presetLabel.style.opacity = isSync ? '0.55' : '1';
   if (minsLabel) minsLabel.style.opacity = isSync ? '0.55' : '1';
 }}
-(() => {{ const v = Number(intervalMinutes.value); if ([15,30,60,90].includes(v)) intervalPreset.value = String(v); else intervalPreset.value = 'custom'; }})();
+(() => {{ const v = Number(intervalMinutes.value); if ([10,15,30,60,90].includes(v)) intervalPreset.value = String(v); else intervalPreset.value = 'custom'; }})();
 (() => {{ dripMode.value = "{config['app'].get('dripMode','sync')}"; updateDripModeUI(); }})();
 dripMode.addEventListener('change', updateDripModeUI);
 function addList() {{ post('/api/lists', {{name:listName.value, type:listType.value, mediaType:listMedia.value, url:listUrl.value}}); }}
@@ -2094,6 +2091,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/general":
+                was_worker_enabled = bool(config["app"].get("workerEnabled"))
                 config["app"]["dripMode"] = data.get("dripMode", "sync")
                 if config["app"]["dripMode"] not in ("timed", "sync"):
                     config["app"]["dripMode"] = "sync"
@@ -2113,6 +2111,9 @@ class Handler(BaseHTTPRequestHandler):
                 elif data.get("toggleWorker"):
                     config["app"]["workerEnabled"] = not config["app"].get("workerEnabled")
                 save_config(config)
+                if config["app"].get("workerEnabled") and not was_worker_enabled:
+                    with LOCK:
+                        process_once()
                 self.respond(200, json.dumps({"ok": True, "message": "Settings saved.", "reload": True}), "application/json")
                 return
 
