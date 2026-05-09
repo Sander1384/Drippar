@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Sander1384/Drippar/releases/tag/v0.1.0"><img alt="Release" src="https://img.shields.io/github/v/release/Sander1384/Drippar?label=release"></a>
+  <a href="https://github.com/Sander1384/Drippar/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/Sander1384/Drippar?label=release"></a>
   <a href="https://github.com/Sander1384/Drippar/actions/workflows/docker-publish.yml"><img alt="Docker build" src="https://img.shields.io/github/actions/workflow/status/Sander1384/Drippar/docker-publish.yml?branch=main&label=docker%20build"></a>
   <a href="https://github.com/Sander1384/Drippar/pkgs/container/driparr"><img alt="GHCR" src="https://img.shields.io/badge/GHCR-driparr-blue"></a>
   <img alt="Docker" src="https://img.shields.io/badge/docker-ready-2496ED">
@@ -86,7 +86,7 @@ Create `docker-compose.yml`:
 ```yaml
 services:
   driparr:
-    image: ghcr.io/sander1384/driparr:v0.1.6
+    image: ghcr.io/sander1384/driparr:v0.1.7
     container_name: driparr
     restart: unless-stopped
     ports:
@@ -227,7 +227,7 @@ docker compose up -d
 
 ## Links
 
-- [Latest release](https://github.com/Sander1384/Drippar/releases/tag/v0.1.6)
+- [Latest release](https://github.com/Sander1384/Drippar/releases/latest)
 - [Container image](https://github.com/Sander1384/Drippar/pkgs/container/driparr)
 - [Docker workflow](https://github.com/Sander1384/Drippar/actions/workflows/docker-publish.yml)
 

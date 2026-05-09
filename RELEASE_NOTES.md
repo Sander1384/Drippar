@@ -1,4 +1,4 @@
-# Driparr v0.1.6
+# Driparr v0.1.7
 
 Liveblog rabbit mood UI release for Driparr.
 
@@ -25,7 +25,7 @@ Create a data folder and a `docker-compose.yml`:
 ```yaml
 services:
   driparr:
-    image: ghcr.io/sander1384/driparr:v0.1.6
+    image: ghcr.io/sander1384/driparr:v0.1.7
     container_name: driparr
     restart: unless-stopped
     ports:
