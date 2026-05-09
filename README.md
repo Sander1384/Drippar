@@ -204,9 +204,9 @@ http://<NAS-IP>:18080
 ## Drip Modes
 
 | Mode | Behavior |
-| --- | --- |
+|---|---|
 | Timed | Adds up to `maxItemsPerRun` items every configured interval. |
-| Sync | Waits until Driparr's own current Radarr item appears complete before adding the next item. Downloads added outside Driparr do not block the queue. |
+| Sync | Waits for Driparr's own current Radarr item to complete before adding the next item. External downloads do not block the queue. |
 
 Use `Timed` for predictable batches. Use `Sync` when you want a slower one-at-a-time flow.
 
