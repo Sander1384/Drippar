@@ -35,7 +35,7 @@ SESSIONS = {}
 SESSION_TTL_SECONDS = 60 * 60 * 12
 MAX_REQUEST_BYTES = 2 * 1024 * 1024
 MAX_CSV_CHARS = 2 * 1024 * 1024
-APP_VERSION_FALLBACK = "0.1.17"
+APP_VERSION_FALLBACK = "0.1.18"
 
 
 def detect_app_version():
@@ -1757,10 +1757,6 @@ def page(config, queue):
     done_items = len(completed)
     skipped_items = len(skipped)
     summary_text = f"{done_items}/{total_items} - skipped {skipped_items}" if total_items else "0/0 - skipped 0"
-    event_rows = "\n".join(
-        f"<li><span><span class='pill event-pill {html.escape(e.get('level','info'))}'>{html.escape(e.get('level','info'))}</span> {html.escape(e.get('title',''))}</span><small>{html.escape(e.get('detail',''))}</small></li>"
-        for e in LAST_EVENTS[:10]
-    ) or "<li><span>No events yet</span><small>Driparr actions will appear here.</small></li>"
     liveblog_rows = "\n".join(
         f"<li><small>{html.escape(format_time_only(entry.get('at')))}</small><span>{html.escape(entry.get('message',''))}</span></li>"
         for entry in LIVEBLOG[:12]
@@ -2032,7 +2028,6 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 </div>
 <div class=\"dashboard-grid\">
 <div class=\"panel liveblog-panel\"><div class=\"liveblog-head\"><div><h3>Driparr liveblog</h3><p class=\"sub\" style=\"margin-bottom:10px\">Live updates from the checks running behind the scenes.</p></div><div class=\"rabbit-mood\" data-mood-label=\"{html.escape(rabbit_mood['label'])}\" title=\"{html.escape(rabbit_hover_title)}\"><img id=\"rabbitMoodImg\" src=\"{html.escape(rabbit_mood['src'])}\" data-mood=\"{html.escape(LIVEBLOG[0].get('mood') if LIVEBLOG else 'idle')}\" alt=\"Driparr rabbit mood: {html.escape(rabbit_alt_label)}\"></div></div><div class=\"feed-list liveblog-list\"><ul id=\"liveblogRows\">{liveblog_rows}</ul></div></div>
-<div class=\"panel\"><h3 style=\"margin-top:0\">Recent Events</h3><p class=\"sub\">What Driparr has done recently.</p><div class=\"feed-list\"><ul>{event_rows}</ul></div></div>
 <div class=\"panel\"><h3 style=\"margin-top:0\" data-i18n=\"already_library\">Already in Library</h3><p class=\"sub\" data-i18n=\"already_library_sub\">Automatically skipped to prevent duplicates.</p><div class=\"feed-list\"><ul>{skipped_rows}</ul></div></div>
 <div class=\"panel\"><h3 style=\"margin-top:0\">Skipped: No Release</h3><p class=\"sub\">Radarr searched but did not grab a release, or reported no usable indexer.</p><div class=\"feed-list\"><ul>{no_indexer_rows}</ul></div></div>
 </div>
@@ -2487,7 +2482,6 @@ function uiText(key) {{
       no_todo:'No todo items', queue_empty:'Queue is empty', no_active:'No active drip yet',
       nothing_added:'Nothing added yet', run_worker:'Run the worker to start',
       no_queue:'No queue items yet', queue_meta:'Queue', items:'items',
-      recent_events:'Recent Events', recent_events_sub:'What Driparr has done recently.',
       skipped_no_release:'Skipped: No Release',
       skipped_no_release_sub:'Radarr searched but did not grab a release, or reported no usable indexer.',
       liveblog_title:'Driparr liveblog', liveblog_sub:'Live updates from the checks running behind the scenes.',
@@ -2514,7 +2508,6 @@ function uiText(key) {{
       no_todo:'Geen todo items', queue_empty:'Queue is leeg', no_active:'Nog geen actieve drip',
       nothing_added:'Nog niets toegevoegd', run_worker:'Start de worker om te beginnen',
       no_queue:'Nog geen queue-items', queue_meta:'Queue', items:'items',
-      recent_events:'Recente gebeurtenissen', recent_events_sub:'Wat Driparr recent heeft gedaan.',
       skipped_no_release:'Overgeslagen: geen release',
       skipped_no_release_sub:'Radarr heeft gezocht maar geen release gegrepen, of meldt geen bruikbare indexer.',
       liveblog_title:'Driparr liveblog', liveblog_sub:'Live updates van de controles achter de schermen.',
@@ -2541,7 +2534,6 @@ function uiText(key) {{
       no_todo:'Keine Todo-Einträge', queue_empty:'Queue ist leer', no_active:'Noch kein aktiver Drip',
       nothing_added:'Noch nichts hinzugefügt', run_worker:'Starte den Worker, um zu beginnen',
       no_queue:'Noch keine Queue-Einträge', queue_meta:'Queue', items:'Einträge',
-      recent_events:'Letzte Ereignisse', recent_events_sub:'Was Driparr zuletzt getan hat.',
       skipped_no_release:'Übersprungen: keine Release',
       skipped_no_release_sub:'Radarr hat gesucht, aber keine Release gegriffen, oder meldet keinen nutzbaren Indexer.',
       liveblog_title:'Driparr-Liveblog', liveblog_sub:'Live-Updates aus den Prüfungen im Hintergrund.',
@@ -2702,15 +2694,9 @@ function applyI18n() {{
     rabbitImg.alt = `Driparr rabbit mood: ${{rabbitLabelText(rabbitImg.dataset.moodLabel)}}`;
   }}
   const dashboardPanels = document.querySelectorAll('.dashboard-grid .panel');
-  if (dashboardPanels[1]) {{
-    const h3 = dashboardPanels[1].querySelector('h3');
-    const sub = dashboardPanels[1].querySelector('.sub');
-    if (h3) h3.textContent = uiText('recent_events');
-    if (sub) sub.textContent = uiText('recent_events_sub');
-  }}
-  if (dashboardPanels[3]) {{
-    const h3 = dashboardPanels[3].querySelector('h3');
-    const sub = dashboardPanels[3].querySelector('.sub');
+  if (dashboardPanels[2]) {{
+    const h3 = dashboardPanels[2].querySelector('h3');
+    const sub = dashboardPanels[2].querySelector('.sub');
     if (h3) h3.textContent = uiText('skipped_no_release');
     if (sub) sub.textContent = uiText('skipped_no_release_sub');
   }}

@@ -1,13 +1,15 @@
-# Driparr v0.1.17
+# Driparr v0.1.18
 
-Public beta readiness release for Driparr.
+Dashboard clarity release for Driparr.
 
-This release focuses on making Driparr easier and safer for early testers to try.
+This release removes the weak Recent Events dashboard panel and puts the more useful Already in Library list in its place.
 
-It keeps the existing Radarr status handling, live feedback, language consistency, and sync-mode behavior from the previous release, and sharpens the GitHub page for public beta promotion.
+It keeps the public beta README, issue templates, Radarr status handling, live feedback, language consistency, and sync-mode behavior from the previous release.
 
 ## Highlights
 
+- Replaced the Recent Events dashboard panel with Already in Library.
+- The duplicate-skip list is now higher on the dashboard.
 - README now routes new users to the safe mock Radarr test stack before real Radarr setup.
 - Added clearer "Looking for testers" and feedback instructions.
 - Added a "What Driparr is not" section to set expectations before promotion.
@@ -38,7 +40,7 @@ Create a data folder and a `docker-compose.yml`:
 ```yaml
 services:
   driparr:
-    image: ghcr.io/sander1384/driparr:v0.1.17
+    image: ghcr.io/sander1384/driparr:v0.1.18
     container_name: driparr
     restart: unless-stopped
     ports:
