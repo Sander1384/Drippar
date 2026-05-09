@@ -31,6 +31,10 @@ Import an IMDb CSV, review the queue, choose how quickly items should drip into 
   <img src="Screenshots/2.jpg" alt="Driparr quick setup" width="45%">
 </p>
 <p align="center">
+  <img src="Screenshots/8.jpg" alt="Driparr liveblog" width="45%">
+  <img src="Screenshots/7.jpg" alt="Driparr dashboard overview" width="45%">
+</p>
+<p align="center">
   <img src="Screenshots/3.jpg" alt="Driparr dashboard" width="45%">
   <img src="Screenshots/4.jpg" alt="Driparr queue" width="45%">
 </p>
