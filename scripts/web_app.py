@@ -124,6 +124,26 @@ AMBIENT_LIVEBLOG_LINES = [
     ("De volgende stap krijgt alvast een strenge blik. Vriendelijk streng.", "waiting"),
     ("Alles staat nog onder controle. Even knipperen en zo weer verder.", "idle"),
     ("Incomplete downloads horen eerst af te maken. Daar is een duidelijke mening over.", "waiting"),
+    ("Ik tel geen schaapjes, ik tel queue-items. Veel nuttiger.", "idle"),
+    ("Radarr krijgt zo weer een keurige statusvraag. Met nette schoenen aan.", "checking"),
+    ("Ik houd de importdeur op een kier en kijk of er iets binnenkomt.", "waiting"),
+    ("Geen paniek in de downloadstraat. Ik kijk gewoon nog een keer.", "checking"),
+    ("De wachtrij staat recht, de koffie is denkbeeldig, de aandacht is echt.", "thinking"),
+    ("Ik luister naar Radarr alsof het een spannend hoorspel is.", "checking"),
+    ("Er wordt niets geforceerd. Alleen vriendelijk doch beslist gecontroleerd.", "waiting"),
+    ("Ik heb de volgende film al in het vizier, maar eerst deze netjes afronden.", "waiting"),
+    ("Statuscontrole onderweg. Klein knikje naar de API.", "checking"),
+    ("Alles rustig. Dat is soms precies wat je wilt zien.", "idle"),
+    ("Ik poets de voortgangsbalk nog even op in mijn hoofd.", "thinking"),
+    ("Als Radarr iets nieuws fluistert, zet ik het hier meteen neer.", "idle"),
+    ("Ik blijf bij de deur staan tot de download zich meldt.", "waiting"),
+    ("Even de lijst rechttrekken. Niemand raakt hier zoek.", "checking"),
+    ("Rustig tempo, scherpe blik. Zo hoort een drip te lopen.", "thinking"),
+    ("Ik controleer zo weer of rood echt rood is, en niet stiekem bijna groen.", "checking"),
+    ("De queue krijgt geen haast, wel aandacht.", "idle"),
+    ("Ik wacht op bewijs, niet op hoop. Radarr mag het zeggen.", "waiting"),
+    ("Kleine ronde langs de statuslampjes. Alles krijgt een blik.", "checking"),
+    ("Ik hou het netjes: eerst weten, dan doen.", "thinking"),
 ]
 
 
@@ -1822,13 +1842,21 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 .feed-list h3 {{ margin:2px 0 10px; font-size:16px; }} .feed-list ul {{ list-style:none; margin:0; padding:0; max-height:270px; overflow:auto; }} .feed-list li {{ display:flex; justify-content:space-between; gap:10px; padding:7px 6px; border-bottom:1px solid #2a1f44; }}
 .feed-list li span {{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }} .feed-list li small {{ color:#a49ac2; font-size:12px; }}
 .dashboard-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }}
-.liveblog-panel {{ border-color:#594090; }}
+.liveblog-panel {{ border-color:#594090; background:linear-gradient(160deg,#17102a,#120b22); }}
 .liveblog-list ul {{ max-height:330px; }}
-.liveblog-list li {{ justify-content:flex-start; align-items:flex-start; }}
+.liveblog-list li {{ justify-content:flex-start; align-items:flex-start; border-left:3px solid transparent; padding-left:9px; transition:background .16s ease, border-color .16s ease; }}
+.liveblog-list li:first-child {{ background:rgba(125,75,255,.12); border-color:#8f62ff; border-radius:8px; }}
+.liveblog-list li.mood-completed {{ border-color:#35d68b; }}
+.liveblog-list li.mood-failed {{ border-color:#ff7f96; }}
+.liveblog-list li.mood-skipped_no_indexer,.liveblog-list li.mood-skipped {{ border-color:#ffbe3d; }}
+.liveblog-list li.mood-waiting {{ border-color:#7db0ff; }}
+.liveblog-list li.mood-adding,.liveblog-list li.mood-added {{ border-color:#66e7aa; }}
 .liveblog-list li small {{ flex:0 0 54px; color:#8fb7ff; font-weight:700; }}
 .liveblog-list li span {{ white-space:normal; overflow:visible; text-overflow:clip; line-height:1.35; }}
 .liveblog-head {{ display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:start; gap:12px; }}
 .liveblog-head h3 {{ margin:0; }}
+.liveblog-chip {{ display:inline-flex; align-items:center; gap:6px; margin-top:8px; padding:4px 9px; border:1px solid #4f3a84; border-radius:999px; color:#cabcf0; background:#171027; font-size:12px; font-weight:800; }}
+.liveblog-chip:before {{ content:""; width:7px; height:7px; border-radius:999px; background:#7dffb1; box-shadow:0 0 10px rgba(125,255,177,.45); }}
 .rabbit-mood {{ width:40px; min-width:40px; height:40px; display:grid; place-items:center; align-self:start; margin-top:1px; }}
 .rabbit-mood img {{ width:36px; height:36px; object-fit:contain; filter:invert(93%) sepia(14%) saturate(773%) hue-rotate(207deg) brightness(105%) contrast(102%); }}
 .drip-card {{ padding:0; overflow:hidden; }}
@@ -1837,7 +1865,8 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 .view-all {{ color:#9f7cff; font-weight:700; cursor:pointer; text-decoration:none; }}
 .timeline {{ padding:10px 14px 16px; }}
 .timeline ul {{ list-style:none; margin:0; padding:0; }}
-.timeline-item {{ display:grid; grid-template-columns:26px 1fr; gap:10px; align-items:start; padding:11px 6px; border-bottom:1px solid #2a1f44; }}
+.timeline-item {{ display:grid; grid-template-columns:26px 1fr; gap:10px; align-items:start; padding:11px 6px; border-bottom:1px solid #2a1f44; transition:background .16s ease, transform .16s ease; }}
+.timeline-item:hover {{ background:rgba(255,255,255,.025); transform:translateX(2px); }}
 .timeline-item .dot {{ width:26px; height:26px; border-radius:50%; display:grid; place-items:center; background:#120d1f; border:2px solid #f3b544; box-shadow:0 0 14px rgba(243,181,68,.45); }}
 .timeline-item .dot img {{ width:12px; height:12px; object-fit:contain; filter: brightness(0) invert(1); opacity: .98; }}
 .timeline-current .dot {{ border-color:#4c85ff; box-shadow:0 0 14px rgba(76,133,255,.5); }}
@@ -1928,6 +1957,9 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 @keyframes riseIn {{ from {{ opacity:0; transform:translateY(6px) scale(.99); }} to {{ opacity:1; transform:translateY(0) scale(1); }} }}
 @keyframes fadeSlide {{ from {{ opacity:0; transform:translateY(4px); }} to {{ opacity:1; transform:translateY(0); }} }}
 .queue-wrap {{ overflow:auto; border-radius:10px; }}
+.queue-wrap th {{ position:sticky; top:0; z-index:1; background:#1a1230; }}
+.queue-wrap tbody tr:hover {{ background:rgba(125,75,255,.08); }}
+.btn:focus-visible, input:focus-visible, select:focus-visible, button:focus-visible {{ outline:2px solid #9d8dff; outline-offset:2px; }}
 .guided-focus {{ border-color:#7c63d6 !important; box-shadow:0 0 0 2px rgba(124,99,214,.28), 0 18px 44px rgba(19,10,42,.45) !important; animation:guidedPulse 1.2s ease 2; }}
 @keyframes guidedPulse {{ 0% {{ transform:translateY(0); }} 50% {{ transform:translateY(-2px); }} 100% {{ transform:translateY(0); }} }}
 @media (max-width:1200px) {{
@@ -2003,7 +2035,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
   </div>
 </div>
 <div class=\"dashboard-grid\">
-<div class=\"panel liveblog-panel\"><div class=\"liveblog-head\"><div><h3>Driparr liveblog</h3><p class=\"sub\" style=\"margin-bottom:10px\">Ik vertel hier live wat ik achter de schermen aan het doen ben.</p></div><div class=\"rabbit-mood\" title=\"Driparr voelt zich {html.escape(rabbit_mood['label'])}\"><img id=\"rabbitMoodImg\" src=\"{html.escape(rabbit_mood['src'])}\" data-mood=\"{html.escape(LIVEBLOG[0].get('mood') if LIVEBLOG else 'idle')}\" alt=\"Driparr rabbit mood: {html.escape(rabbit_mood['label'])}\"></div></div><div class=\"feed-list liveblog-list\"><ul id=\"liveblogRows\">{liveblog_rows}</ul></div></div>
+<div class=\"panel liveblog-panel\"><div class=\"liveblog-head\"><div><h3>Driparr liveblog</h3><p class=\"sub\" style=\"margin-bottom:10px\">Ik vertel hier live wat ik achter de schermen aan het doen ben.</p><span class=\"liveblog-chip\" data-i18n=\"liveblog_chip\">Live status feed</span></div><div class=\"rabbit-mood\" title=\"Driparr voelt zich {html.escape(rabbit_mood['label'])}\"><img id=\"rabbitMoodImg\" src=\"{html.escape(rabbit_mood['src'])}\" data-mood=\"{html.escape(LIVEBLOG[0].get('mood') if LIVEBLOG else 'idle')}\" alt=\"Driparr rabbit mood: {html.escape(rabbit_mood['label'])}\"></div></div><div class=\"feed-list liveblog-list\"><ul id=\"liveblogRows\">{liveblog_rows}</ul></div></div>
 <div class=\"panel\"><h3 style=\"margin-top:0\">Recent Events</h3><p class=\"sub\">What Driparr has done recently.</p><div class=\"feed-list\"><ul>{event_rows}</ul></div></div>
 <div class=\"panel\"><h3 style=\"margin-top:0\" data-i18n=\"already_library\">Already in Library</h3><p class=\"sub\" data-i18n=\"already_library_sub\">Automatically skipped to prevent duplicates.</p><div class=\"feed-list\"><ul>{skipped_rows}</ul></div></div>
 <div class=\"panel\"><h3 style=\"margin-top:0\">Skipped: No Release</h3><p class=\"sub\">Radarr searched but did not grab a release, or reported no usable indexer.</p><div class=\"feed-list\"><ul>{no_indexer_rows}</ul></div></div>
@@ -2013,7 +2045,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 <section id=\"queue\" class=\"tab\"><h1>Queue</h1><p class=\"sub\">All items and statuses.</p><div class=\"panel\"><div class=\"queue-wrap\"><table><thead><tr><th>Type</th><th>Title</th><th>ID</th><th>Status</th><th>Source</th><th>Reason</th></tr></thead><tbody id=\"queueTableRows\">{queue_rows}</tbody></table></div></div></section>
 <section id=\"radarr\" class=\"tab\"><h1>Radarr <span>Settings</span></h1><p class=\"sub\">Manage your Radarr instances</p><div class=\"panel\"><div class=\"instance-title\" style=\"margin-bottom:12px\">Instances</div><div class=\"instance-card\"><div><b>Radarr</b> <span class=\"{'enabled-pill' if config['radarr'].get('enabled') else 'disabled-pill'}\">{'Enabled' if config['radarr'].get('enabled') else 'Disabled'}</span> <span style=\"color:#9f92c9;margin-left:10px\">{html.escape(config['radarr'].get('url',''))}</span></div><div class=\"instance-actions\"><button class=\"btn\" onclick=\"openModal('radarrModal')\">Add / Edit Instance</button><button class=\"btn secondary\" onclick=\"testService('radarr')\">Test</button></div></div></div></section>
 <section id=\"sonarr\" class=\"tab\"><h1>Sonarr <span>Settings</span></h1><p class=\"sub\">Manage your Sonarr instances</p><div class=\"panel\"><div class=\"instance-title\" style=\"margin-bottom:12px\">Instances</div><div class=\"instance-card\"><div><b>Sonarr</b> <span class=\"{'enabled-pill' if config['sonarr'].get('enabled') else 'disabled-pill'}\">{'Enabled' if config['sonarr'].get('enabled') else 'Disabled'}</span> <span style=\"color:#9f92c9;margin-left:10px\">{html.escape(config['sonarr'].get('url',''))}</span></div><div class=\"instance-actions\"><button class=\"btn\" onclick=\"openModal('sonarrModal')\">Add / Edit Instance</button><button class=\"btn secondary\" onclick=\"testService('sonarr')\">Test</button></div></div></div></section>
-<section id=\"general\" class=\"tab\"><h1 data-i18n=\"general\">General</h1><div class=\"panel\"><div class=\"grid\"><div><label data-i18n=\"drip_mode\">Drip mode</label><select id=\"dripMode\"><option value=\"timed\" data-i18n=\"drip_mode_timed\">Timed (interval based)</option><option value=\"sync\" data-i18n=\"drip_mode_sync\">Sync (wait for completion)</option></select></div><div><label id=\"intervalPresetLabel\" data-i18n=\"drip_interval\">Drip interval</label><select id=\"intervalPreset\" onchange=\"setIntervalFromPreset()\"><option value=\"10\">Every 10 minutes</option><option value=\"15\" data-i18n=\"every_15\">Every 15 minutes</option><option value=\"30\" data-i18n=\"every_30\">Every 30 minutes</option><option value=\"60\" data-i18n=\"every_60\">Every hour</option><option value=\"90\" data-i18n=\"every_90\">Every 1.5 hours</option><option value=\"custom\" data-i18n=\"custom\">Custom</option></select></div><div><label id=\"intervalMinutesLabel\" data-i18n=\"interval_custom\">Interval minutes (custom)</label><input id=\"intervalMinutes\" type=\"number\" value=\"{config['app'].get('intervalMinutes')}\"></div><div><label data-i18n=\"max_items\">Max items per run</label><input id=\"maxItemsPerRun\" type=\"number\" value=\"{config['app'].get('maxItemsPerRun')}\"></div><div><label>Webhook notifications</label><label class=\"switch\"><input id=\"notifyEnabled\" class=\"switch-input\" type=\"checkbox\" {'checked' if config['app'].get('notifyEnabled', False) else ''}><span class=\"switch-slider\"></span></label></div><div><label>Webhook URL</label><input id=\"notifyWebhookUrl\" value=\"{html.escape(config['app'].get('notifyWebhookUrl',''))}\" placeholder=\"https://example.com/webhook\"></div><div><label data-i18n=\"language\">Language</label><select id=\"languagePref\"><option value=\"auto\" data-i18n=\"language_auto\">Auto (system)</option><option value=\"en\">English</option><option value=\"nl\">Nederlands</option><option value=\"de\">Deutsch</option></select></div></div><div class=\"actions\"><button class=\"btn\" onclick=\"saveGeneral()\" data-i18n=\"save\">Save</button><button class=\"btn secondary\" onclick=\"testNotification()\">Test notification</button><button class=\"btn secondary\" onclick=\"showOnboardingAgain()\" data-i18n=\"show_checklist\">Show checklist</button></div></div></section>
+<section id=\"general\" class=\"tab\"><h1 data-i18n=\"general\">General</h1><div class=\"panel\"><div class=\"grid\"><div><label data-i18n=\"drip_mode\">Drip mode</label><select id=\"dripMode\"><option value=\"timed\" data-i18n=\"drip_mode_timed\">Timed (interval based)</option><option value=\"sync\" data-i18n=\"drip_mode_sync\">Sync (wait for completion)</option></select></div><div><label id=\"intervalPresetLabel\" data-i18n=\"drip_interval\">Drip interval</label><select id=\"intervalPreset\" onchange=\"setIntervalFromPreset()\"><option value=\"10\" data-i18n=\"every_10\">Every 10 minutes</option><option value=\"15\" data-i18n=\"every_15\">Every 15 minutes</option><option value=\"30\" data-i18n=\"every_30\">Every 30 minutes</option><option value=\"60\" data-i18n=\"every_60\">Every hour</option><option value=\"90\" data-i18n=\"every_90\">Every 1.5 hours</option><option value=\"custom\" data-i18n=\"custom\">Custom</option></select></div><div><label id=\"intervalMinutesLabel\" data-i18n=\"interval_custom\">Interval minutes (custom)</label><input id=\"intervalMinutes\" type=\"number\" value=\"{config['app'].get('intervalMinutes')}\"></div><div><label data-i18n=\"max_items\">Max items per run</label><input id=\"maxItemsPerRun\" type=\"number\" value=\"{config['app'].get('maxItemsPerRun')}\"></div><div><label>Webhook notifications</label><label class=\"switch\"><input id=\"notifyEnabled\" class=\"switch-input\" type=\"checkbox\" {'checked' if config['app'].get('notifyEnabled', False) else ''}><span class=\"switch-slider\"></span></label></div><div><label>Webhook URL</label><input id=\"notifyWebhookUrl\" value=\"{html.escape(config['app'].get('notifyWebhookUrl',''))}\" placeholder=\"https://example.com/webhook\"></div><div><label data-i18n=\"language\">Language</label><select id=\"languagePref\"><option value=\"auto\" data-i18n=\"language_auto\">Auto (system)</option><option value=\"en\">English</option><option value=\"nl\">Nederlands</option><option value=\"de\">Deutsch</option></select></div></div><div class=\"actions\"><button class=\"btn\" onclick=\"saveGeneral()\" data-i18n=\"save\">Save</button><button class=\"btn secondary\" onclick=\"testNotification()\">Test notification</button><button class=\"btn secondary\" onclick=\"showOnboardingAgain()\" data-i18n=\"show_checklist\">Show checklist</button></div></div></section>
 </main></div>
 <div id=\"radarrModal\" class=\"modal-backdrop\"><div class=\"modal-card\"><div class=\"modal-head\"><b>Add Instance</b><button class=\"modal-close\" onclick=\"closeModal('radarrModal')\">×</button></div><div class=\"modal-body\">{settings_form('radarr', config['radarr'], include_actions=False)}</div><div class=\"modal-foot\"><button class=\"btn secondary\" onclick=\"testService('radarr')\">Test</button><button class=\"btn\" onclick=\"saveService('radarr')\">Save</button></div></div></div>
 <div id=\"sonarrModal\" class=\"modal-backdrop\"><div class=\"modal-card\"><div class=\"modal-head\"><b>Add Instance</b><button class=\"modal-close\" onclick=\"closeModal('sonarrModal')\">×</button></div><div class=\"modal-body\">{settings_form('sonarr', config['sonarr'], include_actions=False)}</div><div class=\"modal-foot\"><button class=\"btn secondary\" onclick=\"testService('sonarr')\">Test</button><button class=\"btn\" onclick=\"saveService('sonarr')\">Save</button></div></div></div>
@@ -2074,14 +2106,196 @@ function updateRabbitMood(mood, force=false) {{
 function escapeHtml(value) {{
   return String(value).replace(/[&<>"']/g, (char) => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[char]));
 }}
+function translateRuntimeText(value) {{
+  const lang = detectLanguage();
+  let text = String(value || '');
+  if (lang === 'nl' || !text) return text;
+  const common = lang === 'de' ? [
+    [/Radarr bevestigt: (.+?) is binnen\\./g, 'Radarr bestätigt: $1 ist vorhanden.'],
+    [/Radarr bevestigt: (.+?) wordt gedownload of verwerkt\\./g, 'Radarr bestätigt: $1 wird heruntergeladen oder verarbeitet.'],
+    [/Radarr bevestigt: (.+?) wordt gecontroleerd\\./g, 'Radarr bestätigt: $1 wird geprüft.'],
+    [/Radarr bevestigt: (.+?) ontbreekt nog in de library\\./g, 'Radarr bestätigt: $1 fehlt noch in der Bibliothek.'],
+    [/Radarr bevestigt: (.+?) levert geen bruikbare download op\\./g, 'Radarr bestätigt: $1 liefert keinen nutzbaren Download.'],
+    [/Radarr-status voor (.+?): geen extra detail gekregen\\./g, 'Radarr-Status für $1: keine weiteren Details erhalten.'],
+    [/Ik ga over ongeveer (\\d+) minuten opnieuw kijken, rond ([0-9:]+)\\./g, 'Ich prüfe in etwa $1 Minuten erneut, gegen $2.'],
+    [/Ik vraag Radarr via de API om status voor (.+?)\\./g, 'Ich frage Radarr per API nach dem Status von $1.'],
+    [/Ik zet (.+?) bij voltooid\\./g, 'Ich markiere $1 als abgeschlossen.'],
+    [/Ik sla (.+?) over en pak zo de volgende\\./g, 'Ich überspringe $1 und nehme gleich den nächsten Eintrag.'],
+    [/Ik word wakker en kijk wat er in mijn wachtrij staat\\./g, 'Ich wache auf und prüfe meine Queue.'],
+    [/Ik wacht nog even met de volgende film, want (.+?) is nog niet klaar volgens Radarr\\./g, 'Ich warte mit dem nächsten Film, weil $1 laut Radarr noch nicht fertig ist.'],
+    [/Ik kon de Radarr-queue niet controleren op externe downloads: (.+)/g, 'Ich konnte die Radarr-Queue nicht auf externe Downloads prüfen: $1'],
+    [/Ik wacht met nieuwe Driparr-items, want Radarr heeft al een externe download lopen: (.+?)\\./g, 'Ich warte mit neuen Driparr-Einträgen, weil Radarr bereits einen externen Download ausführt: $1.'],
+    [/Ik heb nu geen nieuwe films klaarstaan\\. Ik blijf rustig wachten\\./g, 'Ich habe gerade keine neuen Filme bereit. Ich warte ruhig weiter.'],
+    [/Radarr geeft een fout terug tijdens mijn controle: (.+)/g, 'Radarr gibt bei meiner Prüfung einen Fehler zurück: $1'],
+    [/Radarr is oké, ik ga (.+?) klaarzetten om te downloaden\\./g, 'Radarr ist in Ordnung; ich bereite $1 zum Herunterladen vor.'],
+    [/Radarr heeft de add-opdracht geaccepteerd; ik controleer meteen of zoeken of downloaden zichtbaar is\\./g, 'Radarr hat den Add-Befehl akzeptiert; ich prüfe sofort, ob Suche oder Download sichtbar ist.'],
+    [/De volgende zet ik alvast klaar in mijn hoofd: (.+?)\\. Eerst laat ik Radarr deze afronden\\./g, 'Den nächsten merke ich mir schon vor: $1. Zuerst lasse ich Radarr diesen abschließen.'],
+    [/(.+?) is correct naar Radarr gestuurd en wordt nu door Radarr opgepakt\\./g, '$1 wurde korrekt an Radarr gesendet und wird jetzt von Radarr verarbeitet.'],
+    [/(.+?) is klaar\\. Ik ruim mijn wachtrij bij\\./g, '$1 ist fertig. Ich räume meine Queue auf.'],
+    [/(.+?) staat al in Radarr\\. Ik sla hem netjes over\\./g, '$1 ist bereits in Radarr. Ich überspringe ihn sauber.'],
+    [/(.+?) staat al in Sonarr\\. Ik ga door naar wat hierna komt\\./g, '$1 ist bereits in Sonarr. Ich mache mit dem nächsten Eintrag weiter.'],
+    [/Ik kan (.+?) niet goed koppelen aan Radarr\\. Ik sla hem over zodat de wachtrij doorloopt\\./g, 'Ich kann $1 nicht sauber mit Radarr verknüpfen. Ich überspringe ihn, damit die Queue weiterläuft.'],
+    [/Er ging iets mis met (.+?): (.+)/g, 'Bei $1 ist etwas schiefgelaufen: $2'],
+    [/Radarr markeert de download als probleem\\./g, 'Radarr markiert den Download als Problem.'],
+    [/Radarr queue meldt:/g, 'Radarr-Queue meldet:'],
+    [/Radarr meldt dat het filmbestand beschikbaar is\\./g, 'Radarr meldet, dass die Filmdatei verfügbar ist.'],
+    [/Radarr heeft deze film na controle niet in de library staan; ik kan geen download volgen\\./g, 'Radarr hat diesen Film nach der Prüfung nicht in der Bibliothek; ich kann keinen Download verfolgen.'],
+    [/Radarr ziet deze film nog niet in de library\\./g, 'Radarr sieht diesen Film noch nicht in der Bibliothek.'],
+    [/Radarr meldt dat de download klaar is; ik wacht op import\\./g, 'Radarr meldet, dass der Download fertig ist; ich warte auf den Import.'],
+    [/Radarr meldt dat de download is mislukt of genegeerd\\./g, 'Radarr meldet, dass der Download fehlgeschlagen ist oder ignoriert wurde.'],
+    [/Radarr heeft een actieve download in de queue/g, 'Radarr hat einen aktiven Download in der Queue'],
+    [/Radarr heeft een release gegrepen; ik wacht op download- of importstatus\\./g, 'Radarr hat eine Release gegriffen; ich warte auf Download- oder Importstatus.'],
+    [/Radarr is zichtbaar aan het zoeken voor deze film\\./g, 'Radarr sucht sichtbar nach diesem Film.'],
+    [/Radarr heeft na (\\d+) seconden geen queued download, gegrepen release of import voor deze film\\./g, 'Radarr hat nach $1 Sekunden keinen Queue-Download, keine gegriffene Release und keinen Import für diesen Film.'],
+    [/Radarr is klaar met zoeken, maar heeft geen release gegrepen of download gestart\\./g, 'Radarr ist mit der Suche fertig, hat aber keine Release gegriffen und keinen Download gestartet.'],
+    [/Radarr heeft geen bruikbare indexer:/g, 'Radarr hat keinen nutzbaren Indexer:'],
+    [/Ik wacht op de zoekresultaten van Radarr\\./g, 'Ich warte auf die Suchergebnisse von Radarr.'],
+    [/De wacht wordt gehouden\\. Stilte betekent niet dat er geslapen wordt\\./g, 'Ich halte Wache. Stille bedeutet nicht, dass geschlafen wird.'],
+    [/Even de oren gespitst\\. Nog geen nieuw Radarr-nieuws\\./g, 'Kurz aufgehorcht. Noch keine neuen Radarr-Nachrichten.'],
+    [/Wachtrijen zijn best gezellig, zolang niemand voordringt\\./g, 'Queues sind ganz angenehm, solange sich niemand vordrängelt.'],
+    [/Achter de schermen wordt de boel gladgestreken\\./g, 'Im Hintergrund wird alles saubergezogen.'],
+    [/Kleine statusgedachte: liever langzaam goed dan snel rommelig\\./g, 'Kleiner Statusgedanke: lieber langsam richtig als schnell chaotisch.'],
+    [/De volgende stap krijgt alvast een strenge blik\\. Vriendelijk streng\\./g, 'Der nächste Schritt bekommt schon mal einen strengen Blick. Freundlich streng.'],
+    [/Alles staat nog onder controle\\. Even knipperen en zo weer verder\\./g, 'Alles ist noch unter Kontrolle. Kurz blinzeln, dann geht es weiter.'],
+    [/Incomplete downloads horen eerst af te maken\\. Daar is een duidelijke mening over\\./g, 'Unvollständige Downloads sollten erst fertig werden. Dazu gibt es eine klare Meinung.'],
+    [/Ik tel geen schaapjes, ik tel queue-items\\. Veel nuttiger\\./g, 'Ich zähle keine Schäfchen, ich zähle Queue-Einträge. Viel nützlicher.'],
+    [/Radarr krijgt zo weer een keurige statusvraag\\. Met nette schoenen aan\\./g, 'Radarr bekommt gleich wieder eine ordentliche Statusfrage. Mit guten Schuhen.'],
+    [/Ik houd de importdeur op een kier en kijk of er iets binnenkomt\\./g, 'Ich halte die Importtür einen Spalt offen und schaue, ob etwas hereinkommt.'],
+    [/Geen paniek in de downloadstraat\\. Ik kijk gewoon nog een keer\\./g, 'Keine Panik in der Downloadstraße. Ich schaue einfach noch einmal.'],
+    [/De wachtrij staat recht, de koffie is denkbeeldig, de aandacht is echt\\./g, 'Die Queue steht gerade, der Kaffee ist imaginär, die Aufmerksamkeit ist echt.'],
+    [/Ik luister naar Radarr alsof het een spannend hoorspel is\\./g, 'Ich höre Radarr zu, als wäre es ein spannendes Hörspiel.'],
+    [/Er wordt niets geforceerd\\. Alleen vriendelijk doch beslist gecontroleerd\\./g, 'Es wird nichts erzwungen. Nur freundlich, aber bestimmt geprüft.'],
+    [/Ik heb de volgende film al in het vizier, maar eerst deze netjes afronden\\./g, 'Ich habe den nächsten Film schon im Blick, aber erst wird dieser sauber abgeschlossen.'],
+    [/Statuscontrole onderweg\\. Klein knikje naar de API\\./g, 'Statusprüfung unterwegs. Kleines Nicken an die API.'],
+    [/Alles rustig\\. Dat is soms precies wat je wilt zien\\./g, 'Alles ruhig. Manchmal ist genau das richtig.'],
+    [/Ik poets de voortgangsbalk nog even op in mijn hoofd\\./g, 'Ich poliere den Fortschrittsbalken kurz in Gedanken.'],
+    [/Als Radarr iets nieuws fluistert, zet ik het hier meteen neer\\./g, 'Wenn Radarr etwas Neues flüstert, schreibe ich es sofort hier hin.'],
+    [/Ik blijf bij de deur staan tot de download zich meldt\\./g, 'Ich bleibe an der Tür stehen, bis der Download sich meldet.'],
+    [/Even de lijst rechttrekken\\. Niemand raakt hier zoek\\./g, 'Kurz die Liste geradeziehen. Hier geht niemand verloren.'],
+    [/Rustig tempo, scherpe blik\\. Zo hoort een drip te lopen\\./g, 'Ruhiges Tempo, scharfer Blick. So soll ein Drip laufen.'],
+    [/Ik controleer zo weer of rood echt rood is, en niet stiekem bijna groen\\./g, 'Ich prüfe gleich wieder, ob Rot wirklich Rot ist und nicht heimlich fast Grün.'],
+    [/De queue krijgt geen haast, wel aandacht\\./g, 'Die Queue bekommt keine Eile, aber Aufmerksamkeit.'],
+    [/Ik wacht op bewijs, niet op hoop\\. Radarr mag het zeggen\\./g, 'Ich warte auf Belege, nicht auf Hoffnung. Radarr darf sprechen.'],
+    [/Kleine ronde langs de statuslampjes\\. Alles krijgt een blik\\./g, 'Kleine Runde entlang der Statuslichter. Alles bekommt einen Blick.'],
+    [/Ik hou het netjes: eerst weten, dan doen\\./g, 'Ich halte es sauber: erst wissen, dann handeln.']
+  ] : [
+    [/Radarr bevestigt: (.+?) is binnen\\./g, 'Radarr confirms: $1 is available.'],
+    [/Radarr bevestigt: (.+?) wordt gedownload of verwerkt\\./g, 'Radarr confirms: $1 is downloading or being processed.'],
+    [/Radarr bevestigt: (.+?) wordt gecontroleerd\\./g, 'Radarr confirms: $1 is being checked.'],
+    [/Radarr bevestigt: (.+?) ontbreekt nog in de library\\./g, 'Radarr confirms: $1 is still missing from the library.'],
+    [/Radarr bevestigt: (.+?) levert geen bruikbare download op\\./g, 'Radarr confirms: $1 has no usable download.'],
+    [/Radarr-status voor (.+?): geen extra detail gekregen\\./g, 'Radarr status for $1: no extra detail received.'],
+    [/Ik ga over ongeveer (\\d+) minuten opnieuw kijken, rond ([0-9:]+)\\./g, 'I will check again in about $1 minutes, around $2.'],
+    [/Ik vraag Radarr via de API om status voor (.+?)\\./g, 'I am asking Radarr through the API for the status of $1.'],
+    [/Ik zet (.+?) bij voltooid\\./g, 'I am marking $1 as completed.'],
+    [/Ik sla (.+?) over en pak zo de volgende\\./g, 'I am skipping $1 and will pick up the next item shortly.'],
+    [/Ik word wakker en kijk wat er in mijn wachtrij staat\\./g, 'I am waking up and checking my queue.'],
+    [/Ik wacht nog even met de volgende film, want (.+?) is nog niet klaar volgens Radarr\\./g, 'I am waiting before adding the next movie because Radarr says $1 is not done yet.'],
+    [/Ik kon de Radarr-queue niet controleren op externe downloads: (.+)/g, 'I could not check the Radarr queue for external downloads: $1'],
+    [/Ik wacht met nieuwe Driparr-items, want Radarr heeft al een externe download lopen: (.+?)\\./g, 'I am waiting before adding new Driparr items because Radarr already has an external download running: $1.'],
+    [/Ik heb nu geen nieuwe films klaarstaan\\. Ik blijf rustig wachten\\./g, 'I have no new movies ready right now. I will keep waiting.'],
+    [/Radarr geeft een fout terug tijdens mijn controle: (.+)/g, 'Radarr returned an error during my check: $1'],
+    [/Radarr is oké, ik ga (.+?) klaarzetten om te downloaden\\./g, 'Radarr is OK; I am preparing $1 for download.'],
+    [/Radarr heeft de add-opdracht geaccepteerd; ik controleer meteen of zoeken of downloaden zichtbaar is\\./g, 'Radarr accepted the add command; I am immediately checking whether searching or downloading is visible.'],
+    [/De volgende zet ik alvast klaar in mijn hoofd: (.+?)\\. Eerst laat ik Radarr deze afronden\\./g, 'I am keeping the next item ready: $1. First I will let Radarr finish this one.'],
+    [/(.+?) is correct naar Radarr gestuurd en wordt nu door Radarr opgepakt\\./g, '$1 was sent to Radarr correctly and is now being picked up by Radarr.'],
+    [/(.+?) is klaar\\. Ik ruim mijn wachtrij bij\\./g, '$1 is done. I am cleaning up my queue.'],
+    [/(.+?) staat al in Radarr\\. Ik sla hem netjes over\\./g, '$1 is already in Radarr. I am skipping it cleanly.'],
+    [/(.+?) staat al in Sonarr\\. Ik ga door naar wat hierna komt\\./g, '$1 is already in Sonarr. I am moving on to what comes next.'],
+    [/Ik kan (.+?) niet goed koppelen aan Radarr\\. Ik sla hem over zodat de wachtrij doorloopt\\./g, 'I cannot link $1 to Radarr cleanly. I am skipping it so the queue keeps moving.'],
+    [/Er ging iets mis met (.+?): (.+)/g, 'Something went wrong with $1: $2'],
+    [/Radarr markeert de download als probleem\\./g, 'Radarr marks the download as a problem.'],
+    [/Radarr queue meldt:/g, 'Radarr queue reports:'],
+    [/Radarr meldt dat het filmbestand beschikbaar is\\./g, 'Radarr reports that the movie file is available.'],
+    [/Radarr heeft deze film na controle niet in de library staan; ik kan geen download volgen\\./g, 'After checking, Radarr does not have this movie in the library; I cannot follow a download.'],
+    [/Radarr ziet deze film nog niet in de library\\./g, 'Radarr does not see this movie in the library yet.'],
+    [/Radarr meldt dat de download klaar is; ik wacht op import\\./g, 'Radarr reports that the download is complete; I am waiting for import.'],
+    [/Radarr meldt dat de download is mislukt of genegeerd\\./g, 'Radarr reports that the download failed or was ignored.'],
+    [/Radarr heeft een actieve download in de queue/g, 'Radarr has an active download in the queue'],
+    [/Radarr heeft een release gegrepen; ik wacht op download- of importstatus\\./g, 'Radarr grabbed a release; I am waiting for download or import status.'],
+    [/Radarr is zichtbaar aan het zoeken voor deze film\\./g, 'Radarr is visibly searching for this movie.'],
+    [/Radarr heeft na (\\d+) seconden geen queued download, gegrepen release of import voor deze film\\./g, 'After $1 seconds, Radarr has no queued download, grabbed release, or import for this movie.'],
+    [/Radarr is klaar met zoeken, maar heeft geen release gegrepen of download gestart\\./g, 'Radarr finished searching, but did not grab a release or start a download.'],
+    [/Radarr heeft geen bruikbare indexer:/g, 'Radarr has no usable indexer:'],
+    [/Ik wacht op de zoekresultaten van Radarr\\./g, 'I am waiting for Radarr search results.'],
+    [/De wacht wordt gehouden\\. Stilte betekent niet dat er geslapen wordt\\./g, 'I am keeping watch. Silence does not mean I am asleep.'],
+    [/Even de oren gespitst\\. Nog geen nieuw Radarr-nieuws\\./g, 'Quick status check. No new Radarr news yet.'],
+    [/Wachtrijen zijn best gezellig, zolang niemand voordringt\\./g, 'Queues are fine as long as nobody cuts in.'],
+    [/Achter de schermen wordt de boel gladgestreken\\./g, 'Things are being smoothed out behind the scenes.'],
+    [/Kleine statusgedachte: liever langzaam goed dan snel rommelig\\./g, 'Small status thought: better slow and right than fast and messy.'],
+    [/De volgende stap krijgt alvast een strenge blik\\. Vriendelijk streng\\./g, 'The next step is already getting a strict look. Kindly strict.'],
+    [/Alles staat nog onder controle\\. Even knipperen en zo weer verder\\./g, 'Everything is still under control. A quick blink, then onward.'],
+    [/Incomplete downloads horen eerst af te maken\\. Daar is een duidelijke mening over\\./g, 'Incomplete downloads should finish first. I have a clear opinion about that.'],
+    [/Ik tel geen schaapjes, ik tel queue-items\\. Veel nuttiger\\./g, 'I am not counting sheep, I am counting queue items. Much more useful.'],
+    [/Radarr krijgt zo weer een keurige statusvraag\\. Met nette schoenen aan\\./g, 'Radarr is about to get a very tidy status question. Proper shoes included.'],
+    [/Ik houd de importdeur op een kier en kijk of er iets binnenkomt\\./g, 'I am keeping the import door slightly open and watching what comes in.'],
+    [/Geen paniek in de downloadstraat\\. Ik kijk gewoon nog een keer\\./g, 'No panic on download street. I will simply check again.'],
+    [/De wachtrij staat recht, de koffie is denkbeeldig, de aandacht is echt\\./g, 'The queue is straight, the coffee is imaginary, the attention is real.'],
+    [/Ik luister naar Radarr alsof het een spannend hoorspel is\\./g, 'I am listening to Radarr like it is a suspenseful radio play.'],
+    [/Er wordt niets geforceerd\\. Alleen vriendelijk doch beslist gecontroleerd\\./g, 'Nothing is being forced. Just checked kindly and firmly.'],
+    [/Ik heb de volgende film al in het vizier, maar eerst deze netjes afronden\\./g, 'I already have the next movie in sight, but this one gets finished cleanly first.'],
+    [/Statuscontrole onderweg\\. Klein knikje naar de API\\./g, 'Status check underway. A small nod to the API.'],
+    [/Alles rustig\\. Dat is soms precies wat je wilt zien\\./g, 'Everything is calm. Sometimes that is exactly what you want to see.'],
+    [/Ik poets de voortgangsbalk nog even op in mijn hoofd\\./g, 'I am polishing the progress bar in my head for a moment.'],
+    [/Als Radarr iets nieuws fluistert, zet ik het hier meteen neer\\./g, 'If Radarr whispers anything new, I will put it here right away.'],
+    [/Ik blijf bij de deur staan tot de download zich meldt\\./g, 'I am staying by the door until the download checks in.'],
+    [/Even de lijst rechttrekken\\. Niemand raakt hier zoek\\./g, 'Straightening the list for a moment. Nobody gets lost here.'],
+    [/Rustig tempo, scherpe blik\\. Zo hoort een drip te lopen\\./g, 'Calm pace, sharp eye. That is how a drip should run.'],
+    [/Ik controleer zo weer of rood echt rood is, en niet stiekem bijna groen\\./g, 'I will soon check whether red is really red, and not secretly almost green.'],
+    [/De queue krijgt geen haast, wel aandacht\\./g, 'The queue gets no rush, but plenty of attention.'],
+    [/Ik wacht op bewijs, niet op hoop\\. Radarr mag het zeggen\\./g, 'I am waiting for evidence, not hope. Radarr gets to say it.'],
+    [/Kleine ronde langs de statuslampjes\\. Alles krijgt een blik\\./g, 'A small round past the status lights. Everything gets a look.'],
+    [/Ik hou het netjes: eerst weten, dan doen\\./g, 'I keep it tidy: know first, act second.']
+  ];
+  common.forEach(([pattern, replacement]) => {{ text = text.replace(pattern, replacement); }});
+  return text;
+}}
+function localizedMessage(value) {{
+  let text = translateRuntimeText(value || '');
+  const lang = detectLanguage();
+  const maps = {{
+    nl: [
+      ['Test notification sent.', 'Testmelding verzonden.'],
+      ['CSV file is too large (max 2 MB).', uiText('csv_too_large')],
+      ['List not found.', 'Lijst niet gevonden.'],
+      ['List name is required.', 'Lijstnaam is verplicht.'],
+      ['CSV text is empty.', 'CSV-tekst is leeg.'],
+      ['No IMDb IDs found in CSV.', "Geen IMDb-ID's gevonden in de CSV."],
+      ['Radarr URL and API key are required.', 'Radarr URL en API key zijn verplicht.'],
+      ['Request is too large.', 'Aanvraag is te groot.'],
+      ['Invalid JSON payload.', 'Ongeldige JSON-aanvraag.'],
+      ['Webhook URL must be a valid http(s) URL.', 'Webhook URL moet een geldige http(s)-URL zijn.']
+    ],
+    de: [
+      ['Test notification sent.', 'Testbenachrichtigung gesendet.'],
+      ['CSV file is too large (max 2 MB).', uiText('csv_too_large')],
+      ['List not found.', 'Liste nicht gefunden.'],
+      ['List name is required.', 'Listenname ist erforderlich.'],
+      ['CSV text is empty.', 'CSV-Text ist leer.'],
+      ['No IMDb IDs found in CSV.', 'Keine IMDb-IDs in der CSV gefunden.'],
+      ['Radarr URL and API key are required.', 'Radarr-URL und API-Schlüssel sind erforderlich.'],
+      ['Request is too large.', 'Anfrage ist zu groß.'],
+      ['Invalid JSON payload.', 'Ungültige JSON-Anfrage.'],
+      ['Webhook URL must be a valid http(s) URL.', 'Webhook-URL muss eine gültige http(s)-URL sein.']
+    ]
+  }};
+  (maps[lang] || []).forEach(([source, target]) => {{
+    if (text === source) text = target;
+    if (text.startsWith('Test notification failed:')) {{
+      text = lang === 'de' ? text.replace('Test notification failed:', 'Testbenachrichtigung fehlgeschlagen:') : text.replace('Test notification failed:', 'Testmelding mislukt:');
+    }}
+  }});
+  return text;
+}}
 function renderLiveblog(entries) {{
   const list = document.getElementById('liveblogRows');
   if (!list || !Array.isArray(entries)) return;
   list.innerHTML = entries.map((entry) => {{
     const time = String(entry.time || '--:--');
-    const message = String(entry.message || '');
-    return `<li><small>${{escapeHtml(time)}}</small><span>${{escapeHtml(message)}}</span></li>`;
-  }}).join('') || '<li><small>--:--</small><span>Ik sta klaar. Zet de worker aan en ik begin met Radarr controleren.</span></li>';
+    const message = translateRuntimeText(entry.message || '');
+    const mood = String(entry.mood || 'thinking').replace(/[^a-z0-9_-]/gi, '').toLowerCase();
+    return `<li class="mood-${{escapeHtml(mood)}}"><small>${{escapeHtml(time)}}</small><span>${{escapeHtml(message)}}</span></li>`;
+  }}).join('') || `<li class="mood-idle"><small>--:--</small><span>${{escapeHtml(uiText('ready_liveblog'))}}</span></li>`;
 }}
 async function pollLiveblog() {{
   try {{
@@ -2118,14 +2332,14 @@ function renderDashboardTimeline(data) {{
   const stats = document.getElementById('dripStats');
   if (stats) stats.textContent = data.summary || '0/0 - skipped 0';
   const queueMeta = document.getElementById('queueMeta');
-  if (queueMeta) queueMeta.textContent = `Queue: ${{Number(data.queueCount || 0)}} items`;
+  if (queueMeta) queueMeta.textContent = `${{uiText('queue_meta')}}: ${{Number(data.queueCount || 0)}} ${{uiText('items')}}`;
 
   const queuedRows = document.getElementById('queuedRows');
   const queued = Array.isArray(data.queued) ? data.queued : [];
   if (queuedRows) {{
     queuedRows.innerHTML = queued.map((item) => `
       <li class="timeline-item timeline-queued"><span class="dot"><img src="/assets/wall-clock.svg" alt="Queued"></span><div><span class="badge b-orange">Queued</span><span>${{escapeHtml(item.title || '')}}</span><small>${{escapeHtml(item.externalId || '')}}</small></div></li>
-    `).join('') || '<li class="timeline-item timeline-queued"><span class="dot"><img src="/assets/wall-clock.svg" alt="Queued"></span><div><span class="badge b-orange">Queued</span><span>No todo items</span><small>Queue is empty</small></div></li>';
+    `).join('') || `<li class="timeline-item timeline-queued"><span class="dot"><img src="/assets/wall-clock.svg" alt="Queued"></span><div><span class="badge b-orange">Queued</span><span>${{escapeHtml(uiText('no_todo'))}}</span><small>${{escapeHtml(uiText('queue_empty'))}}</small></div></li>`;
   }}
 
   const currentRows = document.getElementById('currentDripRows');
@@ -2133,7 +2347,7 @@ function renderDashboardTimeline(data) {{
     if (data.current) {{
       currentRows.innerHTML = `<li class="timeline-item timeline-current"><span class="dot"><img src="/assets/water-drop.svg" alt="Current"></span><div><span class="badge b-blue">Current</span><span>${{escapeHtml(data.current.title || '')}}</span>${{renderProgress(data.current)}}</div></li>`;
     }} else {{
-      currentRows.innerHTML = '<li class="timeline-item timeline-current"><span class="dot"><img src="/assets/water-drop.svg" alt="Current"></span><div><span class="badge b-blue">Current</span><span>No active drip yet</span><small></small></div></li>';
+      currentRows.innerHTML = `<li class="timeline-item timeline-current"><span class="dot"><img src="/assets/water-drop.svg" alt="Current"></span><div><span class="badge b-blue">Current</span><span>${{escapeHtml(uiText('no_active'))}}</span><small></small></div></li>`;
     }}
   }}
 
@@ -2142,7 +2356,7 @@ function renderDashboardTimeline(data) {{
   if (completedRows) {{
     completedRows.innerHTML = completed.map((item) => `
       <li class="timeline-item timeline-completed"><span class="dot"><img src="/assets/wall-clock.svg" alt="Completed"></span><div><span class="badge b-green">Completed</span><span>${{escapeHtml(item.title || '')}}</span><small class="completed-time" data-ts="${{escapeHtml(item.addedAt || '')}}">${{escapeHtml(formatTimelineTime(item.addedAt))}}</small></div></li>
-    `).join('') || '<li class="timeline-item timeline-completed"><span class="dot"><img src="/assets/wall-clock.svg" alt="Completed"></span><div><span class="badge b-green">Completed</span><span>Nothing added yet</span><small>Run the worker to start</small></div></li>';
+    `).join('') || `<li class="timeline-item timeline-completed"><span class="dot"><img src="/assets/wall-clock.svg" alt="Completed"></span><div><span class="badge b-green">Completed</span><span>${{escapeHtml(uiText('nothing_added'))}}</span><small>${{escapeHtml(uiText('run_worker'))}}</small></div></li>`;
   }}
   applyI18n();
 }}
@@ -2151,8 +2365,8 @@ function renderQueueTable(rows) {{
   if (!body || !Array.isArray(rows)) return;
   body.innerHTML = rows.map((row) => {{
     const status = String(row.status || '');
-    return `<tr><td>${{escapeHtml(row.type || '')}}</td><td>${{escapeHtml(row.title || '')}}</td><td>${{escapeHtml(row.externalId || '')}}</td><td><span class="pill ${{escapeHtml(status)}}">${{escapeHtml(status)}}</span></td><td>${{escapeHtml(row.source || '')}}</td><td>${{escapeHtml(row.reason || '')}}</td></tr>`;
-  }}).join('') || '<tr><td colspan="6" style="color:#a49ac2">No queue items yet</td></tr>';
+    return `<tr><td>${{escapeHtml(row.type || '')}}</td><td>${{escapeHtml(row.title || '')}}</td><td>${{escapeHtml(row.externalId || '')}}</td><td><span class="pill ${{escapeHtml(status)}}">${{escapeHtml(status)}}</span></td><td>${{escapeHtml(row.source || '')}}</td><td>${{escapeHtml(translateRuntimeText(row.reason || ''))}}</td></tr>`;
+  }}).join('') || `<tr><td colspan="6" style="color:#a49ac2">${{escapeHtml(uiText('no_queue'))}}</td></tr>`;
   applyI18n();
 }}
 async function pollDashboardTimeline() {{
@@ -2174,6 +2388,93 @@ function detectLanguage() {{
   if (raw.startsWith('de')) return 'de';
   return 'en';
 }}
+function uiText(key) {{
+  const lang = detectLanguage();
+  const dict = {{
+    en: {{
+      ready_liveblog:'I am ready. Turn on the worker and I will start checking Radarr.',
+      no_todo:'No todo items', queue_empty:'Queue is empty', no_active:'No active drip yet',
+      nothing_added:'Nothing added yet', run_worker:'Run the worker to start',
+      no_queue:'No queue items yet', queue_meta:'Queue', items:'items',
+      recent_events:'Recent Events', recent_events_sub:'What Driparr has done recently.',
+      skipped_no_release:'Skipped: No Release',
+      skipped_no_release_sub:'Radarr searched but did not grab a release, or reported no usable indexer.',
+      liveblog_title:'Driparr liveblog', liveblog_sub:'I report live what I am doing behind the scenes.',
+      liveblog_chip:'Live status feed',
+      check_radarr:'Check Radarr', clear_all:'Clear all', choose_file:'Choose file', no_file:'No file selected',
+      saved_lists:'Saved lists', run_history:'Run history', webhook_notifications:'Webhook notifications',
+      webhook_url:'Webhook URL', root_folder:'Root Folder', api_key:'API key *', quality_profile:'Quality Profile',
+      refresh_profiles:'Refresh profiles', check_now:'Check now', enabled:'Enabled', add_instance:'Add Instance',
+      test_notification:'Test notification', no_events:'No events yet', actions_appear:'Driparr actions will appear here.',
+      no_existing_movies:'No existing movies detected', done:'Done', unexpected_response:'Unexpected server response',
+      csv_too_large:'CSV file is too large (max 2 MB).', saved:'Saved', error:'Error',
+      test_first:'Test first...', test_first_profiles:'Test the connection first to fetch profiles.',
+      testing_connection:'Testing connection...', connection_failed:'Connection failed.',
+      no_profiles:'No quality profiles found in Radarr.', connected_choose:'Connected. Choose your quality profile.',
+      test_radarr_first:'Test Radarr first and choose a quality profile.', name_required:'Name is required',
+      url_required:'URL is required', api_required:'API key is required', radarr_url_required:'Radarr URL is required.',
+      radarr_api_required:'Radarr API key is required.', upload_csv:'Upload CSV', uploading:'Uploading...',
+      import_completed:'Import completed', import_failed:'Import failed', upload_failed:'Upload failed',
+      choose_csv_first:'Choose a CSV file first.', delete_list_confirm:'Are you sure you want to delete this list?',
+      clear_queue_confirm:'Are you sure you want to clear the full queue?'
+    }},
+    nl: {{
+      ready_liveblog:'Ik sta klaar. Zet de worker aan en ik begin met Radarr controleren.',
+      no_todo:'Geen todo items', queue_empty:'Queue is leeg', no_active:'Nog geen actieve drip',
+      nothing_added:'Nog niets toegevoegd', run_worker:'Start de worker om te beginnen',
+      no_queue:'Nog geen queue-items', queue_meta:'Queue', items:'items',
+      recent_events:'Recente gebeurtenissen', recent_events_sub:'Wat Driparr recent heeft gedaan.',
+      skipped_no_release:'Overgeslagen: geen release',
+      skipped_no_release_sub:'Radarr heeft gezocht maar geen release gegrepen, of meldt geen bruikbare indexer.',
+      liveblog_title:'Driparr liveblog', liveblog_sub:'Ik vertel hier live wat ik achter de schermen aan het doen ben.',
+      liveblog_chip:'Live statusfeed',
+      check_radarr:'Controleer Radarr', clear_all:'Alles wissen', choose_file:'Bestand kiezen', no_file:'Geen bestand geselecteerd',
+      saved_lists:'Opgeslagen lijsten', run_history:'Runhistorie', webhook_notifications:'Webhookmeldingen',
+      webhook_url:'Webhook URL', root_folder:'Rootmap', api_key:'API key *', quality_profile:'Quality Profile',
+      refresh_profiles:'Profielen verversen', check_now:'Nu controleren', enabled:'Ingeschakeld', add_instance:'Instantie toevoegen',
+      test_notification:'Testmelding', no_events:'Nog geen gebeurtenissen', actions_appear:'Driparr-acties verschijnen hier.',
+      no_existing_movies:'Geen bestaande films gevonden', done:'Klaar', unexpected_response:'Onverwacht serverantwoord',
+      csv_too_large:'CSV-bestand is te groot (max 2 MB).', saved:'Opgeslagen', error:'Fout',
+      test_first:'Eerst testen...', test_first_profiles:'Test eerst de verbinding om profielen op te halen.',
+      testing_connection:'Verbinding testen...', connection_failed:'Verbinding mislukt.',
+      no_profiles:'Geen quality profiles gevonden in Radarr.', connected_choose:'Verbonden. Kies je quality profile.',
+      test_radarr_first:'Test Radarr eerst en kies een quality profile.', name_required:'Naam is verplicht',
+      url_required:'URL is verplicht', api_required:'API key is verplicht', radarr_url_required:'Radarr URL is verplicht.',
+      radarr_api_required:'Radarr API key is verplicht.', upload_csv:'CSV uploaden', uploading:'Uploaden...',
+      import_completed:'Import voltooid', import_failed:'Import mislukt', upload_failed:'Upload mislukt',
+      choose_csv_first:'Kies eerst een CSV-bestand.', delete_list_confirm:'Weet je zeker dat je deze lijst wilt verwijderen?',
+      clear_queue_confirm:'Weet je zeker dat je de volledige queue wilt wissen?'
+    }},
+    de: {{
+      ready_liveblog:'Ich bin bereit. Aktiviere den Worker, dann beginne ich mit der Radarr-Prüfung.',
+      no_todo:'Keine Todo-Einträge', queue_empty:'Queue ist leer', no_active:'Noch kein aktiver Drip',
+      nothing_added:'Noch nichts hinzugefügt', run_worker:'Starte den Worker, um zu beginnen',
+      no_queue:'Noch keine Queue-Einträge', queue_meta:'Queue', items:'Einträge',
+      recent_events:'Letzte Ereignisse', recent_events_sub:'Was Driparr zuletzt getan hat.',
+      skipped_no_release:'Übersprungen: keine Release',
+      skipped_no_release_sub:'Radarr hat gesucht, aber keine Release gegriffen, oder meldet keinen nutzbaren Indexer.',
+      liveblog_title:'Driparr-Liveblog', liveblog_sub:'Ich berichte live, was ich im Hintergrund mache.',
+      liveblog_chip:'Live-Statusfeed',
+      check_radarr:'Radarr prüfen', clear_all:'Alles löschen', choose_file:'Datei auswählen', no_file:'Keine Datei ausgewählt',
+      saved_lists:'Gespeicherte Listen', run_history:'Laufhistorie', webhook_notifications:'Webhook-Benachrichtigungen',
+      webhook_url:'Webhook-URL', root_folder:'Root-Ordner', api_key:'API-Schlüssel *', quality_profile:'Qualitätsprofil',
+      refresh_profiles:'Profile aktualisieren', check_now:'Jetzt prüfen', enabled:'Aktiviert', add_instance:'Instanz hinzufügen',
+      test_notification:'Testbenachrichtigung', no_events:'Noch keine Ereignisse', actions_appear:'Driparr-Aktionen erscheinen hier.',
+      no_existing_movies:'Keine vorhandenen Filme erkannt', done:'Fertig', unexpected_response:'Unerwartete Serverantwort',
+      csv_too_large:'CSV-Datei ist zu groß (max. 2 MB).', saved:'Gespeichert', error:'Fehler',
+      test_first:'Zuerst testen...', test_first_profiles:'Teste zuerst die Verbindung, um Profile zu laden.',
+      testing_connection:'Verbindung wird getestet...', connection_failed:'Verbindung fehlgeschlagen.',
+      no_profiles:'Keine Qualitätsprofile in Radarr gefunden.', connected_choose:'Verbunden. Wähle dein Qualitätsprofil.',
+      test_radarr_first:'Teste Radarr zuerst und wähle ein Qualitätsprofil.', name_required:'Name ist erforderlich',
+      url_required:'URL ist erforderlich', api_required:'API-Schlüssel ist erforderlich', radarr_url_required:'Radarr-URL ist erforderlich.',
+      radarr_api_required:'Radarr-API-Schlüssel ist erforderlich.', upload_csv:'CSV hochladen', uploading:'Hochladen...',
+      import_completed:'Import abgeschlossen', import_failed:'Import fehlgeschlagen', upload_failed:'Upload fehlgeschlagen',
+      choose_csv_first:'Wähle zuerst eine CSV-Datei.', delete_list_confirm:'Diese Liste wirklich löschen?',
+      clear_queue_confirm:'Die gesamte Queue wirklich löschen?'
+    }}
+  }};
+  return (dict[lang] && dict[lang][key]) || dict.en[key] || key;
+}}
 function applyI18n() {{
   const lang = detectLanguage();
   const dict = {{
@@ -2186,9 +2487,10 @@ function applyI18n() {{
       onboarding_2:'Import an IMDb CSV list.', onboarding_3:'Choose drip mode (timed or sync) and interval.',
       onboarding_4:'Enable worker and monitor the timeline.', set_and_forget:'Set and forget.', got_it:'Got it',
       general:'General', drip_mode:'Drip mode', drip_mode_timed:'Timed (interval based)', drip_mode_sync:'Sync (wait for completion)',
-      drip_interval:'Drip interval', every_15:'Every 15 minutes', every_30:'Every 30 minutes', every_60:'Every hour', every_90:'Every 90 minutes',
+      drip_interval:'Drip interval', every_10:'Every 10 minutes', every_15:'Every 15 minutes', every_30:'Every 30 minutes', every_60:'Every hour', every_90:'Every 90 minutes',
       custom:'Custom', interval_custom:'Interval minutes (custom)', max_items:'Max items per run',
-      imdb_import:'IMDb import enabled', language:'Language', language_auto:'Auto (system)', save:'Save', show_checklist:'Show checklist'
+      imdb_import:'IMDb import enabled', language:'Language', language_auto:'Auto (system)', save:'Save', show_checklist:'Show checklist',
+      liveblog_chip:'Live status feed'
     }},
     nl: {{
       dashboard:'Dashboard', dashboard_sub:'Live overzicht van queue, huidige drip en afgeronde items.',
@@ -2200,9 +2502,10 @@ function applyI18n() {{
       onboarding_3:'Kies dripmodus (timed of sync) en interval.', onboarding_4:'Zet de worker aan en volg de timeline.',
       set_and_forget:'Set and forget.', got_it:'Begrepen', general:'Algemeen', drip_mode:'Drip modus',
       drip_mode_timed:'Timed (op interval)', drip_mode_sync:'Sync (wacht op afronding)', drip_interval:'Drip interval',
-      every_15:'Elke 15 minuten', every_30:'Elke 30 minuten', every_60:'Elk uur', every_90:'Elke 1,5 uur', custom:'Aangepast',
+      every_10:'Elke 10 minuten', every_15:'Elke 15 minuten', every_30:'Elke 30 minuten', every_60:'Elk uur', every_90:'Elke 1,5 uur', custom:'Aangepast',
       interval_custom:'Interval minuten (aangepast)', max_items:'Max items per run',
-      imdb_import:'IMDb import actief', language:'Taal', language_auto:'Auto (systeem)', save:'Opslaan', show_checklist:'Toon checklist'
+      imdb_import:'IMDb import actief', language:'Taal', language_auto:'Auto (systeem)', save:'Opslaan', show_checklist:'Toon checklist',
+      liveblog_chip:'Live statusfeed'
     }},
     de: {{
       dashboard:'Dashboard', dashboard_sub:'Live-Übersicht von Queue, aktuellem Drip und abgeschlossenen Einträgen.',
@@ -2214,9 +2517,10 @@ function applyI18n() {{
       onboarding_3:'Drip-Modus (zeitgesteuert oder sync) und Intervall wählen.', onboarding_4:'Worker aktivieren und Timeline beobachten.',
       set_and_forget:'Set and forget.', got_it:'Verstanden', general:'Allgemein', drip_mode:'Drip-Modus',
       drip_mode_timed:'Zeitgesteuert (Intervall)', drip_mode_sync:'Sync (auf Abschluss warten)', drip_interval:'Drip-Intervall',
-      every_15:'Alle 15 Minuten', every_30:'Alle 30 Minuten', every_60:'Jede Stunde', every_90:'Alle 90 Minuten', custom:'Benutzerdefiniert',
+      every_10:'Alle 10 Minuten', every_15:'Alle 15 Minuten', every_30:'Alle 30 Minuten', every_60:'Jede Stunde', every_90:'Alle 90 Minuten', custom:'Benutzerdefiniert',
       interval_custom:'Intervall Minuten (benutzerdefiniert)', max_items:'Max. Elemente pro Lauf',
-      imdb_import:'IMDb-Import aktiv', language:'Sprache', language_auto:'Auto (System)', save:'Speichern', show_checklist:'Checkliste anzeigen'
+      imdb_import:'IMDb-Import aktiv', language:'Sprache', language_auto:'Auto (System)', save:'Speichern', show_checklist:'Checkliste anzeigen',
+      liveblog_chip:'Live-Statusfeed'
     }}
   }};
   const t = dict[lang] || dict.en;
@@ -2286,6 +2590,39 @@ function applyI18n() {{
   if (csvSub) csvSub.textContent = l.imdb_csv_sub;
   const csvBtn = document.querySelector('#imdbCsvUploadBtn');
   if (csvBtn) csvBtn.textContent = l.import_pasted;
+  const fileTrigger = document.querySelector('.file-trigger');
+  if (fileTrigger) fileTrigger.textContent = uiText('choose_file');
+  const fileMeta = document.getElementById('imdbCsvFileMeta');
+  if (fileMeta && !fileMeta.classList.contains('has-file')) fileMeta.textContent = uiText('no_file');
+  const dashboardButtons = document.querySelectorAll('.worker-toggle-wrap .btn.secondary');
+  if (dashboardButtons[0]) dashboardButtons[0].textContent = uiText('check_radarr');
+  if (dashboardButtons[1]) dashboardButtons[1].textContent = uiText('clear_all');
+  const liveHead = document.querySelector('.liveblog-head h3');
+  if (liveHead) liveHead.textContent = uiText('liveblog_title');
+  const liveSub = document.querySelector('.liveblog-head .sub');
+  if (liveSub) liveSub.textContent = uiText('liveblog_sub');
+  const dashboardPanels = document.querySelectorAll('.dashboard-grid .panel');
+  if (dashboardPanels[1]) {{
+    const h3 = dashboardPanels[1].querySelector('h3');
+    const sub = dashboardPanels[1].querySelector('.sub');
+    if (h3) h3.textContent = uiText('recent_events');
+    if (sub) sub.textContent = uiText('recent_events_sub');
+  }}
+  if (dashboardPanels[3]) {{
+    const h3 = dashboardPanels[3].querySelector('h3');
+    const sub = dashboardPanels[3].querySelector('.sub');
+    if (h3) h3.textContent = uiText('skipped_no_release');
+    if (sub) sub.textContent = uiText('skipped_no_release_sub');
+  }}
+  const listPanels = document.querySelectorAll('#lists .panel');
+  if (listPanels[1]) {{
+    const h3 = listPanels[1].querySelector('h3');
+    if (h3) h3.textContent = uiText('saved_lists');
+  }}
+  if (listPanels[2]) {{
+    const h3 = listPanels[2].querySelector('h3');
+    if (h3) h3.textContent = uiText('run_history');
+  }}
   const th = document.querySelectorAll('#queue th');
   if (th[0]) th[0].textContent = l.queue_type;
   if (th[1]) th[1].textContent = l.queue_title;
@@ -2300,6 +2637,41 @@ function applyI18n() {{
   document.querySelectorAll('.modal-foot .btn:not(.secondary):not(.onboarding-save)').forEach((e) => e.textContent = l.save);
   document.querySelectorAll('.enabled-pill').forEach((e) => e.textContent = l.enabled);
   document.querySelectorAll('.disabled-pill').forEach((e) => e.textContent = l.disabled);
+  document.querySelectorAll('.service-row label').forEach((label) => {{
+    const text = label.textContent.trim();
+    if (text === 'Enabled') label.textContent = uiText('enabled');
+    if (text === 'API key *') label.textContent = uiText('api_key');
+    if (text === 'Root Folder') label.textContent = uiText('root_folder');
+    if (text === 'Quality Profile') label.textContent = uiText('quality_profile');
+  }});
+  document.querySelectorAll('.service-row').forEach((row) => {{
+    const label = row.querySelector('label');
+    if (!label) return;
+    if (row.querySelector('input[id$="Enabled"]')) label.textContent = uiText('enabled');
+    if (row.querySelector('input[id$="ApiKey"]')) label.textContent = uiText('api_key');
+    if (row.querySelector('input[id$="Root"]')) label.textContent = uiText('root_folder');
+    if (row.querySelector('select[id$="Quality"], input[id$="Quality"]')) label.textContent = uiText('quality_profile');
+  }});
+  document.querySelectorAll('.inline-actions .btn.secondary').forEach((button) => button.textContent = uiText('refresh_profiles'));
+  document.querySelectorAll('.conn-inline .btn.secondary').forEach((button) => button.textContent = uiText('check_now'));
+  document.querySelectorAll('#radarrModal .modal-head b, #sonarrModal .modal-head b').forEach((title) => title.textContent = uiText('add_instance'));
+  const notifyLabel = document.querySelector('label[for="notifyEnabled"]') || Array.from(document.querySelectorAll('#general label')).find((el) => el.textContent.trim() === 'Webhook notifications');
+  if (notifyLabel) notifyLabel.textContent = uiText('webhook_notifications');
+  const webhookInput = document.getElementById('notifyWebhookUrl');
+  if (webhookInput) {{
+    const label = webhookInput.closest('div')?.querySelector('label');
+    if (label) label.textContent = uiText('webhook_url');
+  }}
+  document.querySelectorAll('#general .actions .btn.secondary').forEach((button) => {{
+    if (button.getAttribute('onclick') === 'testNotification()') button.textContent = uiText('test_notification');
+  }});
+  document.querySelectorAll('.feed-list li').forEach((row) => {{
+    const span = row.querySelector('span');
+    const small = row.querySelector('small');
+    if (span && span.textContent.trim() === 'No events yet') span.textContent = uiText('no_events');
+    if (small && small.textContent.trim() === 'Driparr actions will appear here.') small.textContent = uiText('actions_appear');
+    if (span && span.textContent.trim() === 'No existing movies detected') span.textContent = uiText('no_existing_movies');
+  }});
   document.querySelectorAll('.b-blue').forEach((e) => e.textContent = l.current);
   document.querySelectorAll('.b-orange').forEach((e) => e.textContent = l.queued);
   document.querySelectorAll('.b-green').forEach((e) => e.textContent = l.completed);
@@ -2335,9 +2707,9 @@ async function post(url, data) {{
   try {{
     j = await r.json();
   }} catch (_e) {{
-    j = {{ok:false, message:`Server antwoordde met HTTP ${{r.status}}.`}};
+    j = {{ok:false, message:`Server returned HTTP ${{r.status}}.`}};
   }}
-  toast(j.message || (j.ok ? 'Saved' : 'Error'));
+  toast(localizedMessage(j.message || (j.ok ? uiText('saved') : uiText('error'))));
   if (j.reload) setTimeout(()=>location.reload(), 650);
   if (j && j.ok) setTimeout(pollDashboardTimeline, 250);
   return j;
@@ -2370,7 +2742,7 @@ function setConnIndicator(name, kind, text) {{
   if (!wrap || !label) return;
   wrap.classList.remove('busy','ok','error');
   if (kind) wrap.classList.add(kind);
-  label.textContent = text || 'Not tested yet';
+  label.textContent = text || uiText('test_first');
 }}
 function setServiceButtonsBusy(name, busy) {{
   const selectors = [
@@ -2463,8 +2835,8 @@ function validateService(name) {{
   const apiErr = document.getElementById(name+'ApiKeyError');
   if (urlErr) urlErr.textContent = '';
   if (apiErr) apiErr.textContent = '';
-  if (!url) {{ if (urlErr) urlErr.textContent = 'URL is required'; ok = false; }}
-  if (!api) {{ if (apiErr) apiErr.textContent = 'API key is required'; ok = false; }}
+  if (!url) {{ if (urlErr) urlErr.textContent = uiText('url_required'); ok = false; }}
+  if (!api) {{ if (apiErr) apiErr.textContent = uiText('api_required'); ok = false; }}
   return ok;
 }}
 async function saveService(name) {{
@@ -2530,7 +2902,7 @@ function validateListName() {{
   const err = document.getElementById('listNameError');
   if (err) err.textContent = '';
   if (!name) {{
-    if (err) err.textContent = 'Name is required';
+    if (err) err.textContent = uiText('name_required');
     return false;
   }}
   return true;
@@ -2550,7 +2922,7 @@ function onImdbCsvSelected(input) {{
   const meta = document.getElementById('imdbCsvFileMeta');
   if (!file) {{
     if (meta) {{
-      meta.textContent = 'No file selected';
+      meta.textContent = uiText('no_file');
       meta.classList.remove('has-file');
     }}
     return;
@@ -2566,8 +2938,8 @@ function importImdbCsvFile() {{
   if (!validateListName()) return;
   const fileInput = document.getElementById('imdbCsvFile');
   const file = fileInput?.files && fileInput.files[0];
-  if (!file) {{ toast('Choose a CSV file first.'); return; }}
-  if (file.size > 2 * 1024 * 1024) {{ toast('CSV file is too large (max 2 MB).'); return; }}
+  if (!file) {{ toast(uiText('choose_csv_first')); return; }}
+  if (file.size > 2 * 1024 * 1024) {{ toast(uiText('csv_too_large')); return; }}
   const uploadBtn = document.getElementById('imdbCsvUploadBtn');
   if (uploadBtn) uploadBtn.disabled = true;
   const reader = new FileReader();
@@ -2591,35 +2963,35 @@ function importImdbCsvFile() {{
     xhr.upload.onprogress = (ev) => {{
       if (!ev.lengthComputable) return;
       const p = 45 + (ev.loaded / ev.total) * 50;
-      setCsvProgress(p, 'Uploading...');
+      setCsvProgress(p, uiText('uploading'));
     }};
     xhr.onload = () => {{
       if (uploadBtn) uploadBtn.disabled = false;
       if (xhr.status === 401) {{ location.href = '/login'; return; }}
       try {{
         const j = JSON.parse(xhr.responseText || '{{}}');
-        setCsvProgress(100, 'Done');
-        toast(j.message || (j.ok ? 'Import completed' : 'Import failed'));
+        setCsvProgress(100, uiText('done'));
+        toast(localizedMessage(j.message || (j.ok ? uiText('import_completed') : uiText('import_failed'))));
         if (j.reload) setTimeout(() => location.reload(), 650);
       }} catch (_err) {{
-        toast('Unexpected server response');
+        toast(uiText('unexpected_response'));
       }}
     }};
     xhr.onerror = () => {{
       if (uploadBtn) uploadBtn.disabled = false;
-      toast('Upload failed');
+      toast(uiText('upload_failed'));
     }};
-    setCsvProgress(50, 'Uploading...');
+    setCsvProgress(50, uiText('uploading'));
     xhr.send(payload);
   }};
   reader.readAsText(file);
 }}
 function deleteList(index) {{
-  if (!confirm('Are you sure you want to delete this list?')) return;
+  if (!confirm(uiText('delete_list_confirm'))) return;
   post('/api/lists/delete', {{index:index}});
 }}
 function clearQueue() {{
-  if (!confirm('Are you sure you want to clear the full queue?')) return;
+  if (!confirm(uiText('clear_queue_confirm'))) return;
   post('/api/queue/clear', {{}});
 }}
 function runNow() {{ post('/api/run-now', {{}}); }}
@@ -2644,7 +3016,7 @@ function validateOnboardingRadarrFields() {{
   if (!url) {{
     ok = false;
     if (urlEl) urlEl.classList.add('is-invalid');
-    if (urlErr) urlErr.textContent = 'Radarr URL is required.';
+    if (urlErr) urlErr.textContent = uiText('radarr_url_required');
   }} else if (!/^https?:\\/\\//i.test(url)) {{
     ok = false;
     if (urlEl) urlEl.classList.add('is-invalid');
@@ -2653,7 +3025,7 @@ function validateOnboardingRadarrFields() {{
   if (!api) {{
     ok = false;
     if (apiEl) apiEl.classList.add('is-invalid');
-    if (apiErr) apiErr.textContent = 'Radarr API key is required.';
+    if (apiErr) apiErr.textContent = uiText('radarr_api_required');
   }}
   return ok;
 }}
@@ -2665,18 +3037,18 @@ async function testOnboardingRadarr() {{
   const statusEl = document.getElementById('obQualityStatus');
   if (qualityEl) {{
     qualityEl.disabled = true;
-    qualityEl.innerHTML = '<option value=\"\">Testen...</option>';
+    qualityEl.innerHTML = `<option value="">${{escapeHtml(uiText('testing_connection'))}}</option>`;
   }}
   if (statusEl) {{
     statusEl.classList.remove('ok', 'error');
-    statusEl.textContent = 'Testing connection...';
+    statusEl.textContent = uiText('testing_connection');
   }}
   const j = await post('/api/radarr/discover', {{url:url, apiKey:apiKey}});
   if (!j || !j.ok) {{
     if (statusEl) {{
       statusEl.classList.remove('ok');
       statusEl.classList.add('error');
-      statusEl.textContent = (j && j.message) ? j.message : 'Connection failed.';
+      statusEl.textContent = (j && j.message) ? j.message : uiText('connection_failed');
     }}
     return;
   }}
@@ -2685,7 +3057,7 @@ async function testOnboardingRadarr() {{
     if (statusEl) {{
       statusEl.classList.remove('ok');
       statusEl.classList.add('error');
-      statusEl.textContent = 'No quality profiles found in Radarr.';
+      statusEl.textContent = uiText('no_profiles');
     }}
     return;
   }}
@@ -2702,7 +3074,7 @@ async function testOnboardingRadarr() {{
   if (statusEl) {{
     statusEl.classList.remove('error');
     statusEl.classList.add('ok');
-    statusEl.textContent = 'Connected. Choose your quality profile.';
+    statusEl.textContent = uiText('connected_choose');
   }}
 }}
 function saveOnboardingSetup() {{
@@ -2711,7 +3083,7 @@ function saveOnboardingSetup() {{
   const qualitySelect = document.getElementById('obRadarrQuality');
   const qualityValue = qualitySelect && !qualitySelect.disabled ? Number(qualitySelect.value || 0) : 0;
   if (!validateOnboardingRadarrFields()) return;
-  if (!qualityValue) {{ toast('Test Radarr first and choose a quality profile.'); return; }}
+  if (!qualityValue) {{ toast(uiText('test_radarr_first')); return; }}
   post('/api/quick-setup', {{radarrUrl:url, radarrApiKey:apiKey, qualityProfileId:qualityValue}}).then((j) => {{
     if (j && j.ok) {{
       dismissOnboarding();
@@ -2728,11 +3100,11 @@ function resetOnboardingQualityState() {{
   const statusEl = document.getElementById('obQualityStatus');
   if (qualityEl) {{
     qualityEl.disabled = true;
-    qualityEl.innerHTML = '<option value=\"\">Test first...</option>';
+    qualityEl.innerHTML = `<option value="">${{escapeHtml(uiText('test_first'))}}</option>`;
   }}
   if (statusEl) {{
     statusEl.classList.remove('ok', 'error');
-    statusEl.textContent = 'Test the connection first to fetch profiles.';
+    statusEl.textContent = uiText('test_first_profiles');
   }}
 }}
 document.getElementById('obRadarrUrl')?.addEventListener('input', resetOnboardingQualityState);
@@ -2742,6 +3114,8 @@ if (languagePref) {{
   languagePref.addEventListener('change', () => {{
     localStorage.setItem('driparr_lang_pref', languagePref.value || 'auto');
     applyI18n();
+    pollLiveblog();
+    pollDashboardTimeline();
   }});
 }}
 async function logout() {{ await post('/api/logout', {{}}); location.href='/login'; }}
