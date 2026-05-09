@@ -807,6 +807,27 @@ def queue_entry_is_complete(entry):
     return False
 
 
+def movie_is_available_for_download(movie):
+    status = str(movie.get("status") or "").strip().lower()
+    if status in {"released", "available", "digital", "physical"}:
+        return True
+    for key in ("isAvailable", "isReleased"):
+        if bool(movie.get(key)):
+            return True
+    return False
+
+
+def movie_is_missing_and_monitored(movie):
+    if not isinstance(movie, dict):
+        return False
+    has_file = bool(movie.get("hasFile")) or bool(movie.get("movieFile")) or bool(movie.get("movieFileId"))
+    if has_file:
+        return False
+    if movie.get("monitored") is False:
+        return False
+    return movie_is_available_for_download(movie)
+
+
 def text_contains_any(value, words):
     text = json.dumps(value, default=str).lower() if isinstance(value, (dict, list)) else str(value or "").lower()
     return any(word in text for word in words)
@@ -949,6 +970,11 @@ def radarr_movie_status(config, item):
         return {"state": "skipped_no_indexer", "reason": f"No usable indexer in Radarr: {indexer_reason}"}
 
     age_minutes = minutes_since(item.get("addedAt"))
+    if movie_is_missing_and_monitored(movie) and age_minutes is not None and age_minutes >= 2:
+        return {
+            "state": "skipped_no_indexer",
+            "reason": "Radarr marks the monitored movie as missing, with no queued download or grabbed release.",
+        }
     if command_state == "completed" or (age_minutes is not None and age_minutes >= 10):
         return {"state": "skipped_no_indexer", "reason": "Radarr search finished but no release was grabbed or queued."}
     return {"state": "searching", "reason": "Waiting for Radarr search results."}
