@@ -99,7 +99,12 @@ def next_check_text(config):
     else:
         seconds = max(1, int(config.get("app", {}).get("intervalMinutes", 60))) * 60
     minutes = max(1, int(round(seconds / 60)))
-    return f"Ik ga over ongeveer {minutes} minuten opnieuw kijken, rond {future_time_text(seconds)}."
+    unit = "minuut" if minutes == 1 else "minuten"
+    return f"Ik ga over ongeveer {minutes} {unit} opnieuw kijken, rond {future_time_text(seconds)}."
+
+
+def pluralize(count, singular, plural=None):
+    return singular if int(count) == 1 else (plural or f"{singular}s")
 
 
 RABBIT_MOODS = {
@@ -150,6 +155,64 @@ AMBIENT_LIVEBLOG_LINES = [
 def rabbit_mood_info(mood):
     filename, label = RABBIT_MOODS.get(str(mood or "").strip().lower(), RABBIT_MOODS["checking"])
     return {"src": f"/rabbit-emoji/{filename}", "label": label}
+
+
+def rabbit_label_text(label, language=None):
+    lang = (language or env_force_language() or "nl").strip().lower()
+    key = str(label or "").strip().lower()
+    labels = {
+        "en": {
+            "slaperig": "sleepy",
+            "nadenkend": "thinking",
+            "waakzaam": "watchful",
+            "optimistisch": "optimistic",
+            "lachend": "laughing",
+            "blij": "happy",
+            "geirriteerd": "annoyed",
+            "verdrietig": "sad",
+            "verveeld": "bored",
+            "cool": "cool",
+            "ongemakkelijk": "uneasy",
+            "grinnikend": "chuckling",
+            "plagerig": "teasing",
+            "eigenwijs": "stubborn",
+            "brutaal": "cheeky",
+            "tevreden": "content",
+            "vrolijk": "cheerful",
+            "verrast": "surprised",
+        },
+        "de": {
+            "slaperig": "schläfrig",
+            "nadenkend": "nachdenklich",
+            "waakzaam": "wachsam",
+            "optimistisch": "optimistisch",
+            "lachend": "lachend",
+            "blij": "glücklich",
+            "geirriteerd": "genervt",
+            "verdrietig": "traurig",
+            "verveeld": "gelangweilt",
+            "cool": "cool",
+            "ongemakkelijk": "unbehaglich",
+            "grinnikend": "schmunzelnd",
+            "plagerig": "neckisch",
+            "eigenwijs": "eigensinnig",
+            "brutaal": "frech",
+            "tevreden": "zufrieden",
+            "vrolijk": "fröhlich",
+            "verrast": "überrascht",
+        },
+    }
+    return labels.get(lang, {}).get(key, label or "")
+
+
+def rabbit_title(label):
+    lang = env_force_language() or "nl"
+    translated = rabbit_label_text(label, lang)
+    if lang == "en":
+        return f"Driparr is {translated}"
+    if lang == "de":
+        return f"Driparr ist {translated}"
+    return f"Driparr voelt zich {translated}"
 
 
 def push_event(level, title, detail=""):
@@ -698,7 +761,7 @@ def radarr_payload(config, item):
     if kind == "imdb":
         value = resolve_tmdb_from_imdb(config, value)
         if not value:
-            raise RuntimeError(f"IMDb ID kon niet worden verwerkt: {item['externalId']}")
+            raise RuntimeError(f"IMDb ID could not be processed: {item['externalId']}")
     elif kind != "tmdb":
         raise RuntimeError("Onbekend ID type voor Radarr.")
     radarr = config["radarr"]
@@ -1400,17 +1463,9 @@ def present_queue_reason(row, todo_positions):
         if isinstance(pos, int):
             return f"In queue, position #{pos} for next drip"
         return "In queue for next drip"
-    if status == "skipped":
-        return str(row.get("error", "")).strip() or "Already in library"
-    if status == "skipped_no_indexer":
-        return str(row.get("error", "")).strip() or "Skipped because Radarr did not grab a release"
-    if status in ("active", "added"):
-        return str(row.get("error", "")).strip() or "Added to Radarr; waiting until Radarr reports a movie file"
+    reason = str(row.get("error", "")).strip()
     if status == "completed":
         return "Radarr reports the movie file is available"
-    reason = str(row.get("error", "")).strip()
-    if not reason:
-        return ""
     lowered = reason.lower()
     legacy_reason_map = {
         "bestaat al in radarr op imdb id (gefilterd bij import).": "Already exists in Radarr by IMDb ID (filtered during import).",
@@ -1421,18 +1476,29 @@ def present_queue_reason(row, todo_positions):
         "bestaat al in sonarr (duplicate voorkomen).": "Already exists in Sonarr (duplicate prevented).",
     }
     if lowered in legacy_reason_map:
-        return legacy_reason_map[lowered]
+        reason = legacy_reason_map[lowered]
+        lowered = reason.lower()
     if lowered.startswith("unresolvable: imdb could not be translated to tmdb:"):
-        return ""
+        reason = "IMDb ID could not be mapped to Radarr/TMDb."
     if lowered.startswith("unresolvable: imdb id could not be processed:"):
-        return ""
+        reason = "IMDb ID could not be mapped to Radarr/TMDb."
+    if lowered.startswith("unresolvable: imdb id kon niet worden verwerkt:"):
+        reason = "IMDb ID could not be mapped to Radarr/TMDb."
     if lowered.startswith("imdb id could not be processed:"):
-        return ""
+        reason = "IMDb ID could not be mapped to Radarr/TMDb."
     if lowered.startswith("niet resolvebaar: imdb kon niet naar tmdb worden vertaald:"):
-        return ""
+        reason = "IMDb ID could not be mapped to Radarr/TMDb."
     if lowered.startswith("niet resolvebaar: imdb id kon niet worden verwerkt:"):
-        return ""
+        reason = "IMDb ID could not be mapped to Radarr/TMDb."
     if lowered.startswith("imdb id kon niet worden verwerkt:"):
+        reason = "IMDb ID could not be mapped to Radarr/TMDb."
+    if status == "skipped":
+        return reason or "Already in library"
+    if status == "skipped_no_indexer":
+        return reason or "Skipped because Radarr did not grab a release"
+    if status in ("active", "added"):
+        return reason or "Added to Radarr; waiting until Radarr reports a movie file"
+    if not reason:
         return ""
     return reason
 
@@ -1528,8 +1594,8 @@ def process_once(force=False):
     for item in selected:
         try:
             if item["type"] == "movie":
-                push_liveblog(f"Radarr is oké, ik ga {item['title']} klaarzetten om te downloaden.", "adding")
                 payload = radarr_payload(config, item)
+                push_liveblog(f"Radarr is oké, ik ga {item['title']} klaarzetten om te downloaden.", "adding")
                 if radarr_has_tmdb(config, payload["tmdbId"]):
                     item["status"] = "skipped"
                     item["error"] = "Already exists in Radarr (duplicate prevented)."
@@ -1763,6 +1829,8 @@ def page(config, queue):
         for entry in LIVEBLOG[:12]
     ) or "<li><small>--:--</small><span>Ik sta klaar. Zet de worker aan en ik begin met Radarr controleren.</span></li>"
     rabbit_mood = rabbit_mood_info(LIVEBLOG[0].get("mood") if LIVEBLOG else "idle")
+    rabbit_hover_title = rabbit_title(rabbit_mood["label"])
+    rabbit_alt_label = rabbit_label_text(rabbit_mood["label"])
     current_progress_html = (
         f"<div class='progress-wrap'><div class='progress-label'>{html.escape(progress_status)} {html.escape(current_eta)}</div><div class='progress-track'><div class='progress-fill' style='width:{int(progress_percent)}%'></div></div></div>"
         if current_item and isinstance(progress_percent, int)
@@ -1814,9 +1882,8 @@ def page(config, queue):
     ) or "<tr><td colspan='5' style='color:#a49ac2'>No run history yet</td></tr>"
     return f"""<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Driparr</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&display=swap');
 :root {{ --bg:#090315; --panel:#141026; --line:#3b2d70; --text:#f1ecff; --muted:#9f92c9; --accent:#8a5fff; --green:#2fdd8f; --yellow:#ffbe3d; --red:#ff6f8f; }}
-* {{ box-sizing:border-box; }} body {{ margin:0; font-family:'Space Grotesk',sans-serif; color:var(--text); background:radial-gradient(circle at 35% 0,#1a1041 0,#09031d 50%,#060214 100%); letter-spacing:.1px; }}
+* {{ box-sizing:border-box; }} body {{ margin:0; font-family:Segoe UI,Arial,sans-serif; color:var(--text); background:radial-gradient(circle at 35% 0,#1a1041 0,#09031d 50%,#060214 100%); letter-spacing:.1px; }}
 .app {{ display:grid; grid-template-columns:260px 1fr; min-height:100vh; }} aside {{ background:linear-gradient(180deg,#2f135f,#1f0e45); border-right:1px solid #50358a; padding:14px 10px; }}
 .brand {{ padding:8px 10px 16px; }} .brand-main {{ display:flex; align-items:center; gap:10px; font-size:28px; font-weight:800; }} .brand-version {{ margin:5px 0 0 46px; color:#bcaef1; font-size:12px; font-weight:700; letter-spacing:0; }} .logo-img {{ width:36px; height:36px; border-radius:9px; object-fit:contain; padding:3px; border:1px solid #6c54b7; background:#200f42; }}
 nav button {{ width:100%; border:0; text-align:left; color:#d8cfff; background:transparent; border-radius:10px; padding:12px 12px; font-weight:700; cursor:pointer; margin:4px 0; display:flex; align-items:center; gap:9px; transition:background .22s ease, box-shadow .22s ease, color .22s ease; }}
@@ -2027,7 +2094,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
   </div>
 </div>
 <div class=\"dashboard-grid\">
-<div class=\"panel liveblog-panel\"><div class=\"liveblog-head\"><div><h3>Driparr liveblog</h3><p class=\"sub\" style=\"margin-bottom:10px\">Ik vertel hier live wat ik achter de schermen aan het doen ben.</p></div><div class=\"rabbit-mood\" data-mood-label=\"{html.escape(rabbit_mood['label'])}\" title=\"Driparr voelt zich {html.escape(rabbit_mood['label'])}\"><img id=\"rabbitMoodImg\" src=\"{html.escape(rabbit_mood['src'])}\" data-mood=\"{html.escape(LIVEBLOG[0].get('mood') if LIVEBLOG else 'idle')}\" alt=\"Driparr rabbit mood: {html.escape(rabbit_mood['label'])}\"></div></div><div class=\"feed-list liveblog-list\"><ul id=\"liveblogRows\">{liveblog_rows}</ul></div></div>
+<div class=\"panel liveblog-panel\"><div class=\"liveblog-head\"><div><h3>Driparr liveblog</h3><p class=\"sub\" style=\"margin-bottom:10px\">Ik vertel hier live wat ik achter de schermen aan het doen ben.</p></div><div class=\"rabbit-mood\" data-mood-label=\"{html.escape(rabbit_mood['label'])}\" title=\"{html.escape(rabbit_hover_title)}\"><img id=\"rabbitMoodImg\" src=\"{html.escape(rabbit_mood['src'])}\" data-mood=\"{html.escape(LIVEBLOG[0].get('mood') if LIVEBLOG else 'idle')}\" alt=\"Driparr rabbit mood: {html.escape(rabbit_alt_label)}\"></div></div><div class=\"feed-list liveblog-list\"><ul id=\"liveblogRows\">{liveblog_rows}</ul></div></div>
 <div class=\"panel\"><h3 style=\"margin-top:0\">Recent Events</h3><p class=\"sub\">What Driparr has done recently.</p><div class=\"feed-list\"><ul>{event_rows}</ul></div></div>
 <div class=\"panel\"><h3 style=\"margin-top:0\" data-i18n=\"already_library\">Already in Library</h3><p class=\"sub\" data-i18n=\"already_library_sub\">Automatically skipped to prevent duplicates.</p><div class=\"feed-list\"><ul>{skipped_rows}</ul></div></div>
 <div class=\"panel\"><h3 style=\"margin-top:0\">Skipped: No Release</h3><p class=\"sub\">Radarr searched but did not grab a release, or reported no usable indexer.</p><div class=\"feed-list\"><ul>{no_indexer_rows}</ul></div></div>
@@ -2141,6 +2208,7 @@ function translateRuntimeText(value) {{
     [/Radarr bevestigt: (.+?) ontbreekt nog in de library\\./g, 'Radarr bestätigt: $1 fehlt noch in der Bibliothek.'],
     [/Radarr bevestigt: (.+?) levert geen bruikbare download op\\./g, 'Radarr bestätigt: $1 liefert keinen nutzbaren Download.'],
     [/Radarr-status voor (.+?): geen extra detail gekregen\\./g, 'Radarr-Status für $1: keine weiteren Details erhalten.'],
+    [/Ik ga over ongeveer 1 minuut opnieuw kijken, rond ([0-9:]+)\\./g, 'Ich prüfe in etwa 1 Minute erneut, gegen $1.'],
     [/Ik ga over ongeveer (\\d+) minuten opnieuw kijken, rond ([0-9:]+)\\./g, 'Ich prüfe in etwa $1 Minuten erneut, gegen $2.'],
     [/Ik vraag Radarr via de API om status voor (.+?)\\./g, 'Ich frage Radarr per API nach dem Status von $1.'],
     [/Ik zet (.+?) bij voltooid\\./g, 'Ich markiere $1 als abgeschlossen.'],
@@ -2209,6 +2277,7 @@ function translateRuntimeText(value) {{
     [/Radarr bevestigt: (.+?) ontbreekt nog in de library\\./g, 'Radarr confirms: $1 is still missing from the library.'],
     [/Radarr bevestigt: (.+?) levert geen bruikbare download op\\./g, 'Radarr confirms: $1 has no usable download.'],
     [/Radarr-status voor (.+?): geen extra detail gekregen\\./g, 'Radarr status for $1: no extra detail received.'],
+    [/Ik ga over ongeveer 1 minuut opnieuw kijken, rond ([0-9:]+)\\./g, 'I will check again in about 1 minute, around $1.'],
     [/Ik ga over ongeveer (\\d+) minuten opnieuw kijken, rond ([0-9:]+)\\./g, 'I will check again in about $1 minutes, around $2.'],
     [/Ik vraag Radarr via de API om status voor (.+?)\\./g, 'I am asking Radarr through the API for the status of $1.'],
     [/Ik zet (.+?) bij voltooid\\./g, 'I am marking $1 as completed.'],
@@ -3422,7 +3491,7 @@ class Handler(BaseHTTPRequestHandler):
                 config["lists"].append(data)
                 save_config(config)
                 added = import_list(data["type"], data["url"], data["mediaType"], data.get("name", ""))
-                self.respond(200, json.dumps({"ok": True, "message": f"{added} items imported.", "reload": True}), "application/json")
+                self.respond(200, json.dumps({"ok": True, "message": f"{added} {pluralize(added, 'item')} imported.", "reload": True}), "application/json")
                 return
 
             if path == "/api/lists/delete":
@@ -3461,6 +3530,8 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 save_config(config)
                 added = enqueue_ids(config, media_type, "imdb", entries, list_name)
+                submitted = len(entries)
+                skipped_existing = max(0, submitted - int(added))
                 push_run_history(
                     config,
                     {
@@ -3477,15 +3548,18 @@ class Handler(BaseHTTPRequestHandler):
                 refresh_run_history(config, read_queue())
                 save_config(config)
                 worker_enabled = bool(config.get("app", {}).get("workerEnabled"))
+                imported_text = f"{added} new {pluralize(added, 'item')} imported from CSV"
+                if skipped_existing:
+                    imported_text = f"{imported_text}; {skipped_existing} already in queue or skipped during import"
                 if worker_enabled:
                     with LOCK:
                         process_once(force=True)
-                    message = f"{added} items imported from CSV. First drip has started."
+                    message = f"{imported_text}. First drip has started."
                 else:
-                    message = f"{added} items imported from CSV. Worker is paused, nothing has been dripped yet."
-                push_event("info", f"CSV imported: {list_name}", f"{added} items queued")
+                    message = f"{imported_text}. Worker is paused, nothing has been dripped yet."
+                push_event("info", f"CSV imported: {list_name}", f"{added} {pluralize(added, 'item')} queued")
                 try:
-                    send_webhook_notification(config, "list_imported", f"List imported: {list_name}", f"{added} items queued", {"listName": list_name, "queued": added})
+                    send_webhook_notification(config, "list_imported", f"List imported: {list_name}", f"{added} {pluralize(added, 'item')} queued", {"listName": list_name, "queued": added})
                 except Exception:
                     pass
                 self.respond(200, json.dumps({"ok": True, "message": message, "reload": True}), "application/json")
