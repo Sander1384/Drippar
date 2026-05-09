@@ -235,9 +235,9 @@ def env_sync_poll_seconds():
 
 def env_no_download_skip_seconds():
     try:
-        return max(15, int(os.getenv("DRIPARR_NO_DOWNLOAD_SKIP_SECONDS", "30") or "30"))
+        return max(15, int(os.getenv("DRIPARR_NO_DOWNLOAD_SKIP_SECONDS", "60") or "60"))
     except ValueError:
-        return 30
+        return 60
 
 
 def hash_password(password, salt):
@@ -283,6 +283,7 @@ def default_config():
             "notifyEnabled": False,
             "notifyWebhookUrl": "",
             "runHistory": [],
+            "respectExternalRadarrQueue": True,
             "adminUsername": "",
             "adminPasswordHash": "",
             "adminPasswordSalt": "",
@@ -330,6 +331,8 @@ def read_config():
         app_cfg["notifyWebhookUrl"] = ""
     if "runHistory" not in app_cfg or not isinstance(app_cfg.get("runHistory"), list):
         app_cfg["runHistory"] = []
+    if "respectExternalRadarrQueue" not in app_cfg:
+        app_cfg["respectExternalRadarrQueue"] = True
     if "adminUsername" not in app_cfg:
         app_cfg["adminUsername"] = ""
     if "adminPasswordHash" not in app_cfg:
@@ -865,6 +868,59 @@ def queue_entry_progress_text(entry):
     return ", ".join(parts)
 
 
+def queue_entry_title(entry):
+    if not isinstance(entry, dict):
+        return ""
+    nested = entry.get("movie")
+    if isinstance(nested, dict):
+        title = str(nested.get("title") or "").strip()
+        if title:
+            return title
+    return str(entry.get("title") or entry.get("downloadTitle") or entry.get("sourceTitle") or "een externe Radarr-download").strip()
+
+
+def active_radarr_movie_ids_for_rows(config, rows):
+    ids = set()
+    active_movies = [row for row in active_queue_items(rows) if row.get("type") == "movie"]
+    if not active_movies:
+        return ids
+    try:
+        movies = service_request(config["radarr"], "GET", "/movie")
+    except RuntimeError:
+        return ids
+    for row in active_movies:
+        try:
+            movie = find_movie_by_tmdb(movies, movie_tmdb_id(config, row))
+        except RuntimeError:
+            continue
+        if movie and movie.get("id") is not None:
+            try:
+                ids.add(int(movie.get("id")))
+            except (TypeError, ValueError):
+                continue
+    return ids
+
+
+def external_radarr_queue_entry(config, rows):
+    if not bool(config.get("app", {}).get("respectExternalRadarrQueue", True)):
+        return None
+    own_movie_ids = active_radarr_movie_ids_for_rows(config, rows)
+    for entry in radarr_queue_records(config):
+        if not isinstance(entry, dict) or queue_entry_is_complete(entry):
+            continue
+        movie_id = entry.get("movieId")
+        nested = entry.get("movie")
+        if movie_id is None and isinstance(nested, dict):
+            movie_id = nested.get("id")
+        try:
+            if movie_id is not None and int(movie_id) in own_movie_ids:
+                continue
+        except (TypeError, ValueError):
+            pass
+        return entry
+    return None
+
+
 def movie_is_available_for_download(movie):
     status = str(movie.get("status") or "").strip().lower()
     if status in {"released", "available", "digital", "physical", "missing"}:
@@ -1224,6 +1280,83 @@ def dashboard_timeline_payload(config, queue):
     }
 
 
+def todo_positions_for_rows(queue):
+    positions = {}
+    pos_counter = 1
+    for row in queue:
+        if str(row.get("status", "")).strip().lower() == "todo":
+            key = str(row.get("externalId", "")).strip()
+            if key:
+                positions[key] = pos_counter
+                pos_counter += 1
+    return positions
+
+
+def display_queue_status(row):
+    status = str(row.get("status", "")).strip().lower()
+    return "active" if status == "added" else status
+
+
+def present_queue_reason(row, todo_positions):
+    status = str(row.get("status", "")).strip().lower()
+    external_id = str(row.get("externalId", "")).strip()
+    if status == "todo":
+        pos = todo_positions.get(external_id)
+        if isinstance(pos, int):
+            return f"In queue, position #{pos} for next drip"
+        return "In queue for next drip"
+    if status == "skipped":
+        return str(row.get("error", "")).strip() or "Already in library"
+    if status == "skipped_no_indexer":
+        return str(row.get("error", "")).strip() or "Skipped because Radarr did not grab a release"
+    if status in ("active", "added"):
+        return str(row.get("error", "")).strip() or "Added to Radarr; waiting until Radarr reports a movie file"
+    if status == "completed":
+        return "Radarr reports the movie file is available"
+    reason = str(row.get("error", "")).strip()
+    if not reason:
+        return ""
+    lowered = reason.lower()
+    legacy_reason_map = {
+        "bestaat al in radarr op imdb id (gefilterd bij import).": "Already exists in Radarr by IMDb ID (filtered during import).",
+        "bestaat al in radarr (gefilterd bij import).": "Already exists in Radarr (filtered during import).",
+        "bestaat al in radarr op titel+jaar (gefilterd bij import).": "Already exists in Radarr by title+year (filtered during import).",
+        "bestaat al in sonarr (gefilterd bij import).": "Already exists in Sonarr (filtered during import).",
+        "bestaat al in radarr (duplicate voorkomen).": "Already exists in Radarr (duplicate prevented).",
+        "bestaat al in sonarr (duplicate voorkomen).": "Already exists in Sonarr (duplicate prevented).",
+    }
+    if lowered in legacy_reason_map:
+        return legacy_reason_map[lowered]
+    if lowered.startswith("unresolvable: imdb could not be translated to tmdb:"):
+        return ""
+    if lowered.startswith("unresolvable: imdb id could not be processed:"):
+        return ""
+    if lowered.startswith("imdb id could not be processed:"):
+        return ""
+    if lowered.startswith("niet resolvebaar: imdb kon niet naar tmdb worden vertaald:"):
+        return ""
+    if lowered.startswith("niet resolvebaar: imdb id kon niet worden verwerkt:"):
+        return ""
+    if lowered.startswith("imdb id kon niet worden verwerkt:"):
+        return ""
+    return reason
+
+
+def queue_table_payload(queue):
+    positions = todo_positions_for_rows(queue)
+    return [
+        {
+            "type": row.get("type", ""),
+            "title": row.get("title", ""),
+            "externalId": row.get("externalId", ""),
+            "status": display_queue_status(row),
+            "source": row.get("source", ""),
+            "reason": present_queue_reason(row, positions),
+        }
+        for row in queue[-140:]
+    ]
+
+
 def discover_radarr_options(service):
     profiles = service_request(service, "GET", "/qualityprofile")
     folders = service_request(service, "GET", "/rootfolder")
@@ -1259,6 +1392,26 @@ def process_once(force=False):
                 "message": f"Sync mode: waiting for Radarr to finish {active_item['title']}. {active_item.get('error', '')}".strip(),
             }
         )
+        if changed:
+            write_queue(rows)
+            if refresh_run_history(config, rows):
+                save_config(config)
+        return
+
+    try:
+        external_entry = external_radarr_queue_entry(config, rows)
+    except RuntimeError as error:
+        external_entry = None
+        push_liveblog(f"Ik kon de Radarr-queue niet controleren op externe downloads: {error}", "failed")
+    if external_entry:
+        detail = queue_entry_progress_text(external_entry)
+        title = queue_entry_title(external_entry)
+        message = f"Ik wacht met nieuwe Driparr-items, want Radarr heeft al een externe download lopen: {title}"
+        if detail:
+            message = f"{message} ({detail})"
+        push_liveblog(message + ".", "waiting")
+        push_liveblog(next_check_text(config), "waiting")
+        LAST_RUN.update({"at": utc_now(), "message": f"Waiting for external Radarr download: {title}"})
         if changed:
             write_queue(rows)
             if refresh_run_history(config, rows):
@@ -1461,49 +1614,6 @@ def page(config, queue):
             return True
         except Exception:
             return False
-    def present_queue_reason(row, todo_positions):
-        status = str(row.get("status", "")).strip().lower()
-        external_id = str(row.get("externalId", "")).strip()
-        if status == "todo":
-            pos = todo_positions.get(external_id)
-            if isinstance(pos, int):
-                return f"In queue, position #{pos} for next drip"
-            return "In queue for next drip"
-        if status == "skipped":
-            return "Already in library"
-        if status == "skipped_no_indexer":
-            return str(row.get("error", "")).strip() or "Skipped because Radarr did not grab a release"
-        if status in ("active", "added"):
-            return str(row.get("error", "")).strip() or "Added to Radarr; waiting until Radarr reports a movie file"
-        if status == "completed":
-            return "Radarr reports the movie file is available"
-        reason = str(row.get("error", "")).strip()
-        if not reason:
-            return ""
-        lowered = reason.lower()
-        legacy_reason_map = {
-            "bestaat al in radarr op imdb id (gefilterd bij import).": "Already exists in Radarr by IMDb ID (filtered during import).",
-            "bestaat al in radarr (gefilterd bij import).": "Already exists in Radarr (filtered during import).",
-            "bestaat al in radarr op titel+jaar (gefilterd bij import).": "Already exists in Radarr by title+year (filtered during import).",
-            "bestaat al in sonarr (gefilterd bij import).": "Already exists in Sonarr (filtered during import).",
-            "bestaat al in radarr (duplicate voorkomen).": "Already exists in Radarr (duplicate prevented).",
-            "bestaat al in sonarr (duplicate voorkomen).": "Already exists in Sonarr (duplicate prevented).",
-        }
-        if lowered in legacy_reason_map:
-            return legacy_reason_map[lowered]
-        if lowered.startswith("unresolvable: imdb could not be translated to tmdb:"):
-            return ""
-        if lowered.startswith("unresolvable: imdb id could not be processed:"):
-            return ""
-        if lowered.startswith("imdb id could not be processed:"):
-            return ""
-        if lowered.startswith("niet resolvebaar: imdb kon niet naar tmdb worden vertaald:"):
-            return ""
-        if lowered.startswith("niet resolvebaar: imdb id kon niet worden verwerkt:"):
-            return ""
-        if lowered.startswith("imdb id kon niet worden verwerkt:"):
-            return ""
-        return reason
 
     radarr_connected = connected(config.get("radarr", {}))
     sonarr_connected = connected(config.get("sonarr", {}))
@@ -1521,19 +1631,9 @@ def page(config, queue):
     no_indexer_skipped = [r for r in queue if r.get("status") == "skipped_no_indexer"]
     skipped = duplicate_skipped + no_indexer_skipped
     failed = [r for r in queue if r.get("status") == "failed"]
-    todo_positions = {}
-    pos_counter = 1
-    for row in queue:
-        if str(row.get("status", "")).strip().lower() == "todo":
-            key = str(row.get("externalId", "")).strip()
-            if key:
-                todo_positions[key] = pos_counter
-                pos_counter += 1
-    def display_status(row):
-        status = str(row.get("status", "")).strip().lower()
-        return "active" if status == "added" else status
+    todo_positions = todo_positions_for_rows(queue)
     queue_rows = "\n".join(
-        f"<tr><td>{html.escape(row['type'])}</td><td>{html.escape(row['title'])}</td><td>{html.escape(row['externalId'])}</td><td><span class='pill {html.escape(display_status(row))}'>{html.escape(display_status(row))}</span></td><td>{html.escape(row['source'])}</td><td>{html.escape(present_queue_reason(row, todo_positions))}</td></tr>"
+        f"<tr><td>{html.escape(row['type'])}</td><td>{html.escape(row['title'])}</td><td>{html.escape(row['externalId'])}</td><td><span class='pill {html.escape(display_queue_status(row))}'>{html.escape(display_queue_status(row))}</span></td><td>{html.escape(row['source'])}</td><td>{html.escape(present_queue_reason(row, todo_positions))}</td></tr>"
         for row in queue[-140:]
     )
     queued_rows = "\n".join(
@@ -1835,7 +1935,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 </div>
 </section>
 <section id=\"lists\" class=\"tab\"><h1>Lists</h1><p class=\"sub\">Import an IMDb CSV file.</p><div class=\"panel\"><div class=\"grid\"><div><label>Name *</label><input id=\"listName\" placeholder=\"My list\" required><div id=\"listNameError\" class=\"field-error\"></div></div><div><label>Media</label><select id=\"listMedia\"><option value=\"movie\">Movies</option><option value=\"series\">Series</option></select></div></div><h3 style=\"margin-top:12px\">IMDb CSV Import</h3><p class=\"sub\">Choose your IMDb export CSV and upload it directly.</p><div class=\"actions\" style=\"align-items:center;gap:10px\"><input id=\"imdbCsvFile\" class=\"file-input-hidden\" type=\"file\" accept=\".csv,text/csv\" onchange=\"onImdbCsvSelected(this)\"><div class=\"file-picker\"><label for=\"imdbCsvFile\" class=\"file-trigger\">Choose file</label><div id=\"imdbCsvFileMeta\" class=\"file-chip\">No file selected</div></div><button id=\"imdbCsvUploadBtn\" class=\"btn secondary\" onclick=\"importImdbCsvFile()\">Upload CSV</button></div><div id=\"imdbCsvProgressWrap\" style=\"display:none;margin-top:10px\"><div style=\"height:10px;background:#2c2449;border:1px solid #4d3a86;border-radius:999px;overflow:hidden\"><div id=\"imdbCsvProgressBar\" style=\"height:100%;width:0%;background:linear-gradient(90deg,#8f62ff,#6635e8)\"></div></div><div id=\"imdbCsvProgressText\" class=\"sub\" style=\"margin-top:6px\">0%</div></div></div><div class=\"panel\"><h3 style=\"margin-top:0\">Saved lists</h3><div class=\"queue-wrap\"><table><thead><tr><th>#</th><th>Name</th><th>Type</th><th>Media</th><th>Source</th><th>Status</th><th>Action</th></tr></thead><tbody>{list_rows}</tbody></table></div></div><div class=\"panel\"><h3 style=\"margin-top:0\">Run history</h3><div class=\"queue-wrap\"><table><thead><tr><th>Time</th><th>List</th><th>Progress</th><th>Status</th><th>A/S/F</th></tr></thead><tbody>{run_history_rows}</tbody></table></div></div></section>
-<section id=\"queue\" class=\"tab\"><h1>Queue</h1><p class=\"sub\">All items and statuses.</p><div class=\"panel\"><div class=\"queue-wrap\"><table><thead><tr><th>Type</th><th>Title</th><th>ID</th><th>Status</th><th>Source</th><th>Reason</th></tr></thead><tbody>{queue_rows}</tbody></table></div></div></section>
+<section id=\"queue\" class=\"tab\"><h1>Queue</h1><p class=\"sub\">All items and statuses.</p><div class=\"panel\"><div class=\"queue-wrap\"><table><thead><tr><th>Type</th><th>Title</th><th>ID</th><th>Status</th><th>Source</th><th>Reason</th></tr></thead><tbody id=\"queueTableRows\">{queue_rows}</tbody></table></div></div></section>
 <section id=\"radarr\" class=\"tab\"><h1>Radarr <span>Settings</span></h1><p class=\"sub\">Manage your Radarr instances</p><div class=\"panel\"><div class=\"instance-title\" style=\"margin-bottom:12px\">Instances</div><div class=\"instance-card\"><div><b>Radarr</b> <span class=\"{'enabled-pill' if config['radarr'].get('enabled') else 'disabled-pill'}\">{'Enabled' if config['radarr'].get('enabled') else 'Disabled'}</span> <span style=\"color:#9f92c9;margin-left:10px\">{html.escape(config['radarr'].get('url',''))}</span></div><div class=\"instance-actions\"><button class=\"btn\" onclick=\"openModal('radarrModal')\">Add / Edit Instance</button><button class=\"btn secondary\" onclick=\"testService('radarr')\">Test</button></div></div></div></section>
 <section id=\"sonarr\" class=\"tab\"><h1>Sonarr <span>Settings</span></h1><p class=\"sub\">Manage your Sonarr instances</p><div class=\"panel\"><div class=\"instance-title\" style=\"margin-bottom:12px\">Instances</div><div class=\"instance-card\"><div><b>Sonarr</b> <span class=\"{'enabled-pill' if config['sonarr'].get('enabled') else 'disabled-pill'}\">{'Enabled' if config['sonarr'].get('enabled') else 'Disabled'}</span> <span style=\"color:#9f92c9;margin-left:10px\">{html.escape(config['sonarr'].get('url',''))}</span></div><div class=\"instance-actions\"><button class=\"btn\" onclick=\"openModal('sonarrModal')\">Add / Edit Instance</button><button class=\"btn secondary\" onclick=\"testService('sonarr')\">Test</button></div></div></div></section>
 <section id=\"general\" class=\"tab\"><h1 data-i18n=\"general\">General</h1><div class=\"panel\"><div class=\"grid\"><div><label data-i18n=\"drip_mode\">Drip mode</label><select id=\"dripMode\"><option value=\"timed\" data-i18n=\"drip_mode_timed\">Timed (interval based)</option><option value=\"sync\" data-i18n=\"drip_mode_sync\">Sync (wait for completion)</option></select></div><div><label id=\"intervalPresetLabel\" data-i18n=\"drip_interval\">Drip interval</label><select id=\"intervalPreset\" onchange=\"setIntervalFromPreset()\"><option value=\"10\">Every 10 minutes</option><option value=\"15\" data-i18n=\"every_15\">Every 15 minutes</option><option value=\"30\" data-i18n=\"every_30\">Every 30 minutes</option><option value=\"60\" data-i18n=\"every_60\">Every hour</option><option value=\"90\" data-i18n=\"every_90\">Every 1.5 hours</option><option value=\"custom\" data-i18n=\"custom\">Custom</option></select></div><div><label id=\"intervalMinutesLabel\" data-i18n=\"interval_custom\">Interval minutes (custom)</label><input id=\"intervalMinutes\" type=\"number\" value=\"{config['app'].get('intervalMinutes')}\"></div><div><label data-i18n=\"max_items\">Max items per run</label><input id=\"maxItemsPerRun\" type=\"number\" value=\"{config['app'].get('maxItemsPerRun')}\"></div><div><label>Webhook notifications</label><label class=\"switch\"><input id=\"notifyEnabled\" class=\"switch-input\" type=\"checkbox\" {'checked' if config['app'].get('notifyEnabled', False) else ''}><span class=\"switch-slider\"></span></label></div><div><label>Webhook URL</label><input id=\"notifyWebhookUrl\" value=\"{html.escape(config['app'].get('notifyWebhookUrl',''))}\" placeholder=\"https://example.com/webhook\"></div><div><label data-i18n=\"language\">Language</label><select id=\"languagePref\"><option value=\"auto\" data-i18n=\"language_auto\">Auto (system)</option><option value=\"en\">English</option><option value=\"nl\">Nederlands</option><option value=\"de\">Deutsch</option></select></div></div><div class=\"actions\"><button class=\"btn\" onclick=\"saveGeneral()\" data-i18n=\"save\">Save</button><button class=\"btn secondary\" onclick=\"testNotification()\">Test notification</button><button class=\"btn secondary\" onclick=\"showOnboardingAgain()\" data-i18n=\"show_checklist\">Show checklist</button></div></div></section>
@@ -1971,11 +2071,22 @@ function renderDashboardTimeline(data) {{
   }}
   applyI18n();
 }}
+function renderQueueTable(rows) {{
+  const body = document.getElementById('queueTableRows');
+  if (!body || !Array.isArray(rows)) return;
+  body.innerHTML = rows.map((row) => {{
+    const status = String(row.status || '');
+    return `<tr><td>${{escapeHtml(row.type || '')}}</td><td>${{escapeHtml(row.title || '')}}</td><td>${{escapeHtml(row.externalId || '')}}</td><td><span class="pill ${{escapeHtml(status)}}">${{escapeHtml(status)}}</span></td><td>${{escapeHtml(row.source || '')}}</td><td>${{escapeHtml(row.reason || '')}}</td></tr>`;
+  }}).join('') || '<tr><td colspan="6" style="color:#a49ac2">No queue items yet</td></tr>';
+  applyI18n();
+}}
 async function pollDashboardTimeline() {{
   try {{
     const response = await fetch('/api/dashboard-timeline', {{headers:{{Accept:'application/json'}}}});
     if (!response.ok) return;
-    renderDashboardTimeline(await response.json());
+    const data = await response.json();
+    renderDashboardTimeline(data);
+    renderQueueTable(data.queueRows || []);
   }} catch (e) {{}}
 }}
 function detectLanguage() {{
@@ -2564,7 +2675,7 @@ startRabbitMoodLoop();
 pollLiveblog();
 pollDashboardTimeline();
 setInterval(pollLiveblog, 5000);
-setInterval(pollDashboardTimeline, 5000);
+setInterval(pollDashboardTimeline, 10000);
 (() => {{
   const next = localStorage.getItem('driparr_next_step');
   if (next === 'lists') {{
@@ -2689,7 +2800,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/dashboard-timeline":
             queue = read_queue()
             payload = dashboard_timeline_payload(config, queue)
-            self.respond(200, json.dumps({"ok": True, **payload}), "application/json")
+            self.respond(200, json.dumps({"ok": True, **payload, "queueRows": queue_table_payload(queue)}), "application/json")
             return
         if path == "/setup":
             self.respond(302, "", location="/")
