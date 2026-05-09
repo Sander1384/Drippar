@@ -24,6 +24,31 @@ Import an IMDb CSV, review the queue, choose how quickly items should drip into 
 > [!IMPORTANT]
 > Driparr is intentionally focused on IMDb CSV to Radarr. It is built for predictable, visible drip-feeding rather than broad list-sync automation.
 
+## Looking For Testers
+
+Driparr is in early beta and ready for testing by Radarr and self-hosted users.
+
+Best ways to help:
+
+- Try the mock Radarr test stack first.
+- Import a small IMDb CSV.
+- Test with your own Radarr setup after the mock flow feels clear.
+- Report unclear behavior, installation issues, or missing features through GitHub Issues.
+
+Please start with a small list before using Driparr on a large real watchlist.
+
+Found a bug or confusing behavior? Please open an issue and include:
+
+- Driparr version.
+- Docker, Portainer, NAS, or local setup.
+- Radarr version.
+- Whether you used mock Radarr or real Radarr.
+- What you expected.
+- What happened.
+- Relevant logs or screenshots.
+
+Please remove API keys, passwords, tokens, private URLs, and personal data before posting.
+
 ## Screenshots
 
 <p align="center">
@@ -70,14 +95,52 @@ Import an IMDb CSV, review the queue, choose how quickly items should drip into 
 ## Supported
 
 | Type | Supported |
-| --- | --- |
+|---|---|
 | List input | IMDb CSV export |
 | Media manager | Radarr |
 | Deployment | Docker Compose, Portainer |
 | Image registry | GitHub Container Registry |
 | Test mode | Mock Radarr stack |
 
+## What Driparr Is Not
+
+Driparr is not meant to replace Radarr import lists, Overseerr, Jellyseerr, Trakt sync tools, or general request systems.
+
+It is meant for controlled, visible, temporary processing of IMDb CSV exports into Radarr.
+
 ## Quick Start
+
+Choose one:
+
+- Safe test mode with mock Radarr.
+- Real Radarr setup.
+
+### Option 1: Safe Test With Mock Radarr
+
+The repository includes a mock Radarr stack for browser testing. This is the safest way to try Driparr without touching a real Radarr instance.
+
+```bash
+docker compose -f docker-compose.test.yml up -d --build
+```
+
+Open:
+
+```text
+http://localhost:8090
+```
+
+Test login:
+
+- username: `admin`
+- password: `admin`
+
+Stop the test stack:
+
+```bash
+docker compose -f docker-compose.test.yml down
+```
+
+### Option 2: Connect To Your Real Radarr
 
 Create a folder for Driparr:
 
@@ -91,7 +154,7 @@ Create `docker-compose.yml`:
 ```yaml
 services:
   driparr:
-    image: ghcr.io/sander1384/driparr:v0.1.16
+    image: ghcr.io/sander1384/driparr:v0.1.17
     container_name: driparr
     restart: unless-stopped
     ports:
@@ -160,31 +223,6 @@ http://<NAS-IP>:18080
 | Sync | Waits until Driparr's own current Radarr item appears complete before adding the next item. Downloads added outside Driparr do not block the queue. |
 
 Use `Timed` for predictable batches. Use `Sync` when you want a slower one-at-a-time flow.
-
-## Test Without Real Radarr
-
-The repository includes a mock Radarr stack for browser testing:
-
-```bash
-docker compose -f docker-compose.test.yml up -d --build
-```
-
-Open:
-
-```text
-http://localhost:8090
-```
-
-Test login:
-
-- username: `admin`
-- password: `admin`
-
-Stop the test stack:
-
-```bash
-docker compose -f docker-compose.test.yml down
-```
 
 ## Updating
 

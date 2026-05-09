@@ -1,13 +1,18 @@
-# Driparr v0.1.16
+# Driparr v0.1.17
 
-Trust and clarity release for Driparr.
+Public beta readiness release for Driparr.
 
-This release focuses on making Driparr's behavior clear enough for real user feedback. It improves Radarr status handling, live feedback, language consistency, and sync-mode behavior.
+This release focuses on making Driparr easier and safer for early testers to try.
 
-This release also fixes the Docker image version environment so freshly pulled containers show the correct current version in the UI.
+It keeps the existing Radarr status handling, live feedback, language consistency, and sync-mode behavior from the previous release, and sharpens the GitHub page for public beta promotion.
 
 ## Highlights
 
+- README now routes new users to the safe mock Radarr test stack before real Radarr setup.
+- Added clearer "Looking for testers" and feedback instructions.
+- Added a "What Driparr is not" section to set expectations before promotion.
+- Added GitHub issue templates for bugs, installation help, feature requests, and tester feedback.
+- Added ready-to-use public beta promotion posts.
 - IMDb CSV import for movie and series exports.
 - Radarr onboarding with connection test, quality profile selection, and root folder setup.
 - Queue dashboard with readable status and reason display.
@@ -33,7 +38,7 @@ Create a data folder and a `docker-compose.yml`:
 ```yaml
 services:
   driparr:
-    image: ghcr.io/sander1384/driparr:v0.1.16
+    image: ghcr.io/sander1384/driparr:v0.1.17
     container_name: driparr
     restart: unless-stopped
     ports:
