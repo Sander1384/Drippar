@@ -7,4 +7,8 @@ _reference/
 curl-cookies.txt
 WORK_NEXT_STEPS.md
 data/queue.csv
+data/config.json
 data-test/queue.csv
+CHATBOT_HANDOFF.md
+Emoji/
+actie-test-10.csv
