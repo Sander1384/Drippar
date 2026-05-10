@@ -28,6 +28,7 @@ to my radarr/qbittorent without clogging up qbit with 100 queue items.
 
 If you loath people 'vibecoding' just leave this page. 
 I had a problem and saw a solution, something I couldn't solve myself without Visual Code. 
+
 So give it a try, Much appriciated. 
 Kind regards from the Netherlands. 
 Xander. 
