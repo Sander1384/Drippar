@@ -193,7 +193,7 @@ http://<NAS-IP>:18080
 ## First Setup
 
 1. Log in with the admin username and password from your compose file.
-2. Enter your Radarr URL, for example `http://radarr:7878` or `http://192.168.1.50:7878`.
+2. Enter your Radarr URL, for example `http://radarr:7878` or `http://radarr.local:7878`.
 3. Paste your Radarr API key.
 4. Click `Test` to fetch Radarr options.
 5. Choose the Radarr quality profile and root folder.
