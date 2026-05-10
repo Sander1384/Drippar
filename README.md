@@ -21,6 +21,17 @@
   <img alt="Docker" src="https://img.shields.io/badge/docker-ready-2496ED">
 </p>
 
+## Note: This is Vibecoded, but human tested.
+
+I made this with Visual code and Codex to solve my own problem of not being able to add huge lists of movies
+to my radarr/qbittorent without clogging up qbit with 100 queue items. 
+
+If you loath people 'vibecoding' just leave this page. 
+I had a problem and saw a solution, something I couldn't solve myself without Visual Code. 
+So give it a try, Much appricated. 
+Kind regards from the Netherlands. 
+Xander. 
+
 ## What Is Driparr?
 
 Driparr is a small self-hosted web app for people who keep large IMDb watchlists and want Radarr
@@ -35,19 +46,6 @@ German.
 > [!IMPORTANT]
 > Driparr is intentionally focused on IMDb CSV to Radarr.
 > It is built for predictable, visible drip-feeding rather than broad list-sync automation.
-
-## Looking for testers
-
-Driparr is in early beta and ready for testing by Radarr and self-hosted users.
-
-Best ways to help:
-
-- Try the mock Radarr test stack first.
-- Import a small IMDb CSV.
-- Test with your own Radarr setup after the mock flow feels clear.
-- Report unclear behavior, installation issues, or missing features through GitHub Issues.
-
-Please start with a small list before using Driparr on a large real watchlist.
 
 ## Screenshots
 
@@ -68,7 +66,7 @@ Please start with a small list before using Driparr on a large real watchlist.
   <img src="Screenshots/6.jpg" alt="Driparr import flow" width="45%">
 </p>
 
-## Why Use It?
+## Why I Use It?
 
 - Avoid bulk-import spikes in Radarr.
 - Keep a visible queue of what will be added next.
