@@ -8,7 +8,13 @@ curl-cookies.txt
 WORK_NEXT_STEPS.md
 data/queue.csv
 data/config.json
+data/*.db
+data/*.db-wal
+data/*.db-shm
 data-test/queue.csv
+data-test/*.db
+data-test/*.db-wal
+data-test/*.db-shm
 CHATBOT_HANDOFF.md
 Emoji/
 actie-test-10.csv

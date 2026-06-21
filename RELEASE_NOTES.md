@@ -1,3 +1,26 @@
+# Driparr v0.2.0
+
+Reliability foundation release for Driparr.
+
+## Highlights
+
+- Added transactional SQLite storage with WAL and automatic JSON/CSV migration.
+- Kept atomic JSON/CSV compatibility exports for rollback safety.
+- Added daily SQLite backups with configurable retention.
+- Added an explicit validated queue state machine.
+- Cached TMDb and Radarr movie IDs per queue item to eliminate repeated IMDb lookups.
+- Added bounded retries, exponential backoff, and per-item retry metadata.
+- Added authenticated worker-health diagnostics and an unauthenticated Docker health endpoint.
+- Added Docker healthcheck support and visible runtime health in the dashboard.
+- Added CSRF protection, login rate limiting, security headers, secure-cookie support, and fail-closed default-secret checks.
+- Reduced noisy dashboard polling logs and switched request logs to structured JSON.
+- Split transactional storage and state transitions into focused modules.
+- Expanded the test suite with migration, storage, state-machine, retry, security, and mock-Radarr lifecycle coverage.
+
+Existing data migrates automatically on first start. The original files are backed up before migration.
+
+---
+
 # Driparr v0.1.19
 
 Worker resilience release for Driparr.

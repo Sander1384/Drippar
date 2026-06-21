@@ -21,6 +21,7 @@
       DRIPARR_ADMIN_USERNAME: admin
       DRIPARR_ADMIN_PASSWORD: admin
       DRIPARR_SESSION_SECRET: test-secret-change-me
+      DRIPARR_ALLOW_INSECURE_DEFAULTS: "true"
     volumes:
       - ./data-test:/app/data
     depends_on:

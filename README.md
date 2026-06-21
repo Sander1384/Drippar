@@ -138,7 +138,7 @@ Create `docker-compose.yml`:
 ```yaml
 services:
   driparr:
-    image: ghcr.io/sander1384/driparr:v0.1.19
+    image: ghcr.io/sander1384/driparr:v0.2.0
     container_name: driparr
     restart: unless-stopped
     ports:
@@ -199,6 +199,15 @@ http://<NAS-IP>:18080
 5. Choose the Radarr quality profile and root folder.
 6. Import an IMDb CSV from the `Lists` page.
 7. Enable the worker when you are ready for Driparr to start adding items.
+
+## Reliability And Data
+
+- Driparr stores configuration and queue state transactionally in SQLite.
+- Existing `config.json` and `queue.csv` files are imported automatically on the first v0.2 startup.
+- Compatibility exports remain available for rollback to an older release.
+- A daily SQLite backup is created automatically under `data/backups/database` with retention.
+- `GET /health` reports web, worker, and storage health and is used by the Docker healthcheck.
+- Temporary Radarr failures use bounded exponential backoff; the worker keeps running and recovers automatically.
 
 ## Drip Modes
 

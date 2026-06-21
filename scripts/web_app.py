@@ -17,13 +17,15 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
+from state_machine import transition_item
+from storage import QUEUE_FIELDS, SQLiteStore
+
 ROOT = Path(__file__).resolve().parents[1]
-DATA = ROOT / "data"
+DATA = Path(os.getenv("DRIPARR_DATA_DIR", str(ROOT / "data"))).resolve()
 ASSETS = ROOT / "assets"
 RABBIT_EMOJI = ROOT / "Rabbit Emoji"
 CONFIG_PATH = DATA / "config.json"
 QUEUE_PATH = DATA / "queue.csv"
-QUEUE_FIELDS = ["type", "externalId", "title", "status", "source", "addedAt", "error"]
 ACTIVE_STATUSES = {"active", "added"}
 SKIPPED_STATUSES = {"skipped", "skipped_no_indexer"}
 LOCK = threading.Lock()
@@ -35,16 +37,20 @@ WORKER_STATE = {
     "lastErrorAt": None,
     "consecutiveFailures": 0,
     "recoveredAt": None,
+    "lastSuccessAt": None,
+    "nextRunAt": None,
 }
 LAST_EVENTS = []
 LIVEBLOG = []
 AMBIENT_INDEX = 0
 LAST_AMBIENT_AT = None
 SESSIONS = {}
+LOGIN_ATTEMPTS = {}
 SESSION_TTL_SECONDS = 60 * 60 * 12
 MAX_REQUEST_BYTES = 2 * 1024 * 1024
 MAX_CSV_CHARS = 2 * 1024 * 1024
-APP_VERSION_FALLBACK = "0.1.19"
+APP_VERSION_FALLBACK = "0.2.0"
+STORE = None
 
 
 def detect_app_version():
@@ -316,6 +322,14 @@ def env_session_secret():
     return os.getenv("DRIPARR_SESSION_SECRET", "replace-me")
 
 
+def allow_insecure_defaults():
+    return os.getenv("DRIPARR_ALLOW_INSECURE_DEFAULTS", "").strip().lower() in {"1", "true", "yes"}
+
+
+def maintenance_mode():
+    return os.getenv("DRIPARR_MAINTENANCE_MODE", "").strip().lower() in {"1", "true", "yes"}
+
+
 def env_force_language():
     value = os.getenv("DRIPARR_FORCE_LANGUAGE", "").strip().lower()
     return value if value in ("en", "nl", "de") else ""
@@ -357,15 +371,12 @@ def verify_login(config, username, password):
 
 
 def ensure_data():
-    DATA.mkdir(exist_ok=True)
-    if not CONFIG_PATH.exists():
-        CONFIG_PATH.write_text(json.dumps(default_config(), indent=2), encoding="utf-8")
-    if not QUEUE_PATH.exists():
-        write_queue([])
+    get_store().initialize()
 
 
 def default_config():
     return {
+        "schemaVersion": 2,
         "app": {
             "setupComplete": False,
             "intervalMinutes": 10,
@@ -381,6 +392,10 @@ def default_config():
             "adminUsername": "",
             "adminPasswordHash": "",
             "adminPasswordSalt": "",
+            "maxWorkerRetries": 5,
+            "retryBaseSeconds": 30,
+            "retryMaxSeconds": 900,
+            "backupRetention": 14,
         },
         "radarr": {
             "enabled": True,
@@ -405,11 +420,18 @@ def default_config():
     }
 
 
-def read_config():
-    ensure_data()
-    with CONFIG_PATH.open("r", encoding="utf-8-sig") as handle:
-        config = json.load(handle)
+def get_store():
+    global STORE
+    if STORE is None:
+        STORE = SQLiteStore(DATA, default_config)
+    return STORE
 
+
+def read_config():
+    config = get_store().read_config()
+    before = json.dumps(config, sort_keys=True, default=str)
+
+    config["schemaVersion"] = 2
     app_cfg = config.setdefault("app", {})
     if "tmdbImporterEnabled" not in app_cfg:
         app_cfg["tmdbImporterEnabled"] = False
@@ -431,6 +453,16 @@ def read_config():
         app_cfg["adminPasswordHash"] = ""
     if "adminPasswordSalt" not in app_cfg:
         app_cfg["adminPasswordSalt"] = ""
+    app_cfg["intervalMinutes"] = safe_int(app_cfg.get("intervalMinutes"), 60, minimum=1, maximum=24 * 60)
+    app_cfg["maxItemsPerRun"] = safe_int(app_cfg.get("maxItemsPerRun"), 1, minimum=1, maximum=50)
+    app_cfg["maxWorkerRetries"] = safe_int(app_cfg.get("maxWorkerRetries"), 5, minimum=1, maximum=20)
+    app_cfg["retryBaseSeconds"] = safe_int(app_cfg.get("retryBaseSeconds"), 30, minimum=5, maximum=3600)
+    app_cfg["retryMaxSeconds"] = safe_int(app_cfg.get("retryMaxSeconds"), 900, minimum=30, maximum=24 * 3600)
+    if app_cfg["retryMaxSeconds"] < app_cfg["retryBaseSeconds"]:
+        app_cfg["retryMaxSeconds"] = app_cfg["retryBaseSeconds"]
+    app_cfg["backupRetention"] = safe_int(app_cfg.get("backupRetention"), 14, minimum=1, maximum=90)
+    if json.dumps(config, sort_keys=True, default=str) != before:
+        get_store().save_config(config)
     return config
 
 
@@ -500,22 +532,15 @@ def send_webhook_notification(config, event_type, title, detail="", payload_extr
 
 
 def save_config(config):
-    with CONFIG_PATH.open("w", encoding="utf-8") as handle:
-        json.dump(config, handle, indent=2)
+    get_store().save_config(config)
 
 
 def read_queue():
-    ensure_data()
-    with QUEUE_PATH.open("r", newline="", encoding="utf-8-sig") as handle:
-        return list(csv.DictReader(handle))
+    return get_store().read_queue()
 
 
 def write_queue(rows):
-    DATA.mkdir(exist_ok=True)
-    with QUEUE_PATH.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=QUEUE_FIELDS)
-        writer.writeheader()
-        writer.writerows(rows)
+    get_store().write_queue(rows)
 
 
 def service_request(service, method, path, payload=None):
@@ -529,19 +554,30 @@ def service_request(service, method, path, payload=None):
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
 
-    request = Request(f"{base_url}/api/v3{path}", data=data, headers=headers, method=method)
-    try:
-        with urlopen(request, timeout=20) as response:
-            body = response.read().decode("utf-8")
-            return json.loads(body) if body else None
-    except HTTPError as error:
-        body = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"HTTP {error.code}: {body}") from error
-    except (URLError, TimeoutError, ConnectionError, OSError) as error:
-        reason = getattr(error, "reason", error)
-        raise RuntimeError(f"Not reachable: {reason}") from error
-    except ValueError as error:
-        raise RuntimeError(f"Invalid URL or port: {base_url}") from error
+    attempts = 3 if method.upper() in {"GET", "HEAD"} else 1
+    for attempt in range(1, attempts + 1):
+        request = Request(f"{base_url}/api/v3{path}", data=data, headers=headers, method=method)
+        try:
+            with urlopen(request, timeout=20) as response:
+                body = response.read().decode("utf-8")
+                return json.loads(body) if body else None
+        except HTTPError as error:
+            body = error.read().decode("utf-8", errors="replace")
+            transient = error.code in {408, 425, 429, 500, 502, 503, 504}
+            if transient and attempt < attempts:
+                retry_after = error.headers.get("Retry-After") if error.headers else None
+                delay = safe_int(retry_after, min(2 ** (attempt - 1), 5), minimum=1, maximum=30)
+                time.sleep(delay)
+                continue
+            raise RuntimeError(f"HTTP {error.code}: {body}") from error
+        except (URLError, TimeoutError, ConnectionError, OSError) as error:
+            if attempt < attempts:
+                time.sleep(min(2 ** (attempt - 1), 5))
+                continue
+            reason = getattr(error, "reason", error)
+            raise RuntimeError(f"Not reachable after {attempts} attempts: {reason}") from error
+        except ValueError as error:
+            raise RuntimeError(f"Invalid URL or port: {base_url}") from error
 
 
 def fetch_text(url, timeout=30, retries=2):
@@ -701,17 +737,18 @@ def enqueue_ids(config, media_type, id_kind, ids, source_name):
             continue
         status = "todo"
         reason = ""
+        cached_tmdb_id = external_id if id_kind == "tmdb" else ""
         if media_type == "movie" and can_check_radarr:
             try:
                 imdb_id_for_check = external_id.lower() if id_kind == "imdb" else ""
                 if radarr_index and imdb_id_for_check and imdb_id_for_check in radarr_index["imdb"]:
                     status = "skipped"
                     reason = "Already exists in Radarr by IMDb ID (filtered during import)."
-                if status == "todo":
-                    tmdb_for_check = external_id if id_kind == "tmdb" else resolve_tmdb_from_imdb(config, external_id)
+                if status == "todo" and id_kind == "tmdb":
+                    tmdb_for_check = external_id
+                    cached_tmdb_id = str(tmdb_for_check or "")
                     if tmdb_for_check and (
                         (radarr_index and str(tmdb_for_check) in radarr_index["tmdb"])
-                        or radarr_has_tmdb(config, int(tmdb_for_check))
                     ):
                         status = "skipped"
                         reason = "Already exists in Radarr (filtered during import)."
@@ -739,6 +776,12 @@ def enqueue_ids(config, media_type, id_kind, ids, source_name):
                 "source": source_name,
                 "addedAt": "",
                 "error": reason,
+                "tmdbId": cached_tmdb_id,
+                "radarrMovieId": "",
+                "retryCount": "0",
+                "nextRetryAt": "",
+                "stateChangedAt": utc_now(),
+                "lastCheckedAt": "",
             }
         )
         existing.add(key)
@@ -766,13 +809,9 @@ def import_list(source_type, url, media_type, name):
 
 
 def radarr_payload(config, item):
-    kind, value = item["externalId"].split(":", 1)
-    if kind == "imdb":
-        value = resolve_tmdb_from_imdb(config, value)
-        if not value:
-            raise RuntimeError(f"IMDb ID could not be processed: {item['externalId']}")
-    elif kind != "tmdb":
-        raise RuntimeError("Onbekend ID type voor Radarr.")
+    value = movie_tmdb_id(config, item)
+    if not value:
+        raise RuntimeError(f"IMDb ID could not be processed: {item['externalId']}")
     radarr = config["radarr"]
     return {
         "tmdbId": int(value),
@@ -830,11 +869,15 @@ def resolve_tmdb_from_imdb(config, imdb_id):
 
 
 def radarr_has_tmdb(config, tmdb_id):
+    return radarr_find_tmdb(config, tmdb_id) is not None
+
+
+def radarr_find_tmdb(config, tmdb_id):
     movies = service_request(config["radarr"], "GET", "/movie")
     for movie in movies or []:
         if int(movie.get("tmdbId", 0)) == int(tmdb_id):
-            return True
-    return False
+            return movie
+    return None
 
 
 def response_records(payload):
@@ -860,7 +903,12 @@ def radarr_history_records(config, movie_id):
     ]
     for path in paths:
         try:
-            return response_records(service_request(config["radarr"], "GET", path))
+            records = response_records(service_request(config["radarr"], "GET", path))
+            return [
+                record
+                for record in records
+                if str(record.get("movieId") or (record.get("movie") or {}).get("id") or "") == str(movie_id)
+            ]
         except RuntimeError:
             continue
     return []
@@ -883,8 +931,14 @@ def radarr_health_records(config):
 
 
 def movie_tmdb_id(config, item):
+    cached = str(item.get("tmdbId") or "").strip()
+    if cached:
+        return cached
     kind, value = item["externalId"].split(":", 1)
-    return value if kind == "tmdb" else resolve_tmdb_from_imdb(config, value)
+    resolved = value if kind == "tmdb" else resolve_tmdb_from_imdb(config, value)
+    if resolved:
+        item["tmdbId"] = str(resolved)
+    return resolved
 
 
 def find_movie_by_tmdb(movies, tmdb_id):
@@ -893,6 +947,18 @@ def find_movie_by_tmdb(movies, tmdb_id):
     for movie in movies or []:
         try:
             if int(movie.get("tmdbId", 0)) == int(tmdb_id):
+                return movie
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def find_movie_by_id(movies, movie_id):
+    if not movie_id:
+        return None
+    for movie in movies or []:
+        try:
+            if int(movie.get("id", 0)) == int(movie_id):
                 return movie
         except (TypeError, ValueError):
             continue
@@ -1163,20 +1229,22 @@ def movie_is_completed_in_radarr(config, item):
     if not tmdb_id:
         return False
     movies = service_request(config["radarr"], "GET", "/movie")
-    movie = find_movie_by_tmdb(movies, tmdb_id)
+    movie = find_movie_by_id(movies, item.get("radarrMovieId")) or find_movie_by_tmdb(movies, tmdb_id)
     if not movie:
         return False
+    item["radarrMovieId"] = str(movie.get("id") or item.get("radarrMovieId") or "")
     return bool(movie.get("hasFile")) or bool(movie.get("movieFile"))
 
 
 def radarr_movie_status(config, item):
+    item["lastCheckedAt"] = utc_now()
     age_minutes = minutes_since(item.get("addedAt"))
     skip_after_minutes = env_no_download_skip_seconds() / 60
     tmdb_id = movie_tmdb_id(config, item)
     if not tmdb_id:
         return {"state": "missing", "reason": "TMDb ID could not be resolved from IMDb."}
     movies = service_request(config["radarr"], "GET", "/movie")
-    movie = find_movie_by_tmdb(movies, tmdb_id)
+    movie = find_movie_by_id(movies, item.get("radarrMovieId")) or find_movie_by_tmdb(movies, tmdb_id)
     if not movie:
         if age_minutes is not None and age_minutes >= skip_after_minutes:
             return {
@@ -1184,6 +1252,7 @@ def radarr_movie_status(config, item):
                 "reason": "Radarr heeft deze film na controle niet in de library staan; ik kan geen download volgen.",
             }
         return {"state": "missing", "reason": "Radarr ziet deze film nog niet in de library."}
+    item["radarrMovieId"] = str(movie.get("id") or item.get("radarrMovieId") or "")
     if bool(movie.get("hasFile")) or bool(movie.get("movieFile")):
         return {"state": "completed", "reason": "Radarr meldt dat het filmbestand beschikbaar is."}
 
@@ -1288,27 +1357,25 @@ def refresh_completed_items(config, rows):
             reason = str(status.get("reason", "")).strip()
             status_message, status_mood = radarr_status_liveblog_message(row["title"], status)
             if state == "completed":
-                row["status"] = "completed"
-                row["error"] = ""
+                transition_item(row, "completed", "")
                 changed = True
                 push_liveblog(status_message, status_mood)
                 push_liveblog(f"{row['title']} gaat naar voltooid.", "completed")
                 push_event("completed", row["title"], reason or "Radarr reports the movie file is available")
             elif state == "skipped_no_indexer":
-                row["status"] = "skipped_no_indexer"
-                row["error"] = reason or "Radarr did not grab a release."
+                transition_item(row, "skipped_no_indexer", reason or "Radarr did not grab a release.")
                 changed = True
                 push_liveblog(status_message, status_mood)
                 push_liveblog(f"{row['title']} wordt overgeslagen; de volgende komt zo aan de beurt.", "skipped_no_indexer")
                 push_event("skipped", row["title"], row["error"])
             elif reason:
                 row["error"] = reason
+                row["lastCheckedAt"] = utc_now()
                 changed = True
                 push_liveblog(status_message, status_mood)
             continue
         if item_is_completed(config, row):
-            row["status"] = "completed"
-            row["error"] = ""
+            transition_item(row, "completed", "")
             changed = True
             push_liveblog(f"{row['title']} is klaar. De wachtrij wordt bijgewerkt.", "completed")
             push_event("completed", row["title"], "Radarr reports the movie file is available")
@@ -1382,6 +1449,7 @@ def dashboard_timeline_payload(config, queue):
     done_items = len(completed)
     skipped_items = len(skipped)
     return {
+        "workerHealth": worker_health_payload(config),
         "summary": f"{done_items}/{total_items} - skipped {skipped_items}" if total_items else "0/0 - skipped 0",
         "queueCount": total_items,
         "queued": [
@@ -1494,6 +1562,49 @@ def discover_radarr_options(service):
     }
 
 
+def is_transient_service_error(error_text):
+    text = str(error_text or "").lower()
+    return any(
+        marker in text
+        for marker in (
+            "not reachable",
+            "timed out",
+            "timeout",
+            "http 408",
+            "http 425",
+            "http 429",
+            "http 500",
+            "http 502",
+            "http 503",
+            "http 504",
+            "connection reset",
+            "temporarily unavailable",
+        )
+    )
+
+
+def schedule_item_retry(item, config, error_text):
+    app_cfg = config.get("app", {})
+    attempts = int(item.get("retryCount") or 0) + 1
+    maximum = max(1, int(app_cfg.get("maxWorkerRetries", 5)))
+    if attempts > maximum:
+        transition_item(item, "failed", f"Retry limit reached after {maximum} attempts: {error_text}")
+        return False
+    base = max(5, int(app_cfg.get("retryBaseSeconds", 30)))
+    cap = max(base, int(app_cfg.get("retryMaxSeconds", 900)))
+    delay = min(cap, base * (2 ** (attempts - 1)))
+    item["retryCount"] = str(attempts)
+    item["nextRetryAt"] = (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat()
+    item["lastCheckedAt"] = utc_now()
+    item["error"] = f"Temporary error; retry {attempts}/{maximum} in {delay}s: {error_text}"
+    return True
+
+
+def retry_is_due(item):
+    next_retry = parse_iso_datetime(item.get("nextRetryAt"))
+    return not next_retry or next_retry <= datetime.now(timezone.utc)
+
+
 def process_once(force=False):
     config = read_config()
     rows = read_queue()
@@ -1508,7 +1619,7 @@ def process_once(force=False):
         LAST_RUN.update({"at": utc_now(), "message": f"Sync check error: {error}"})
         push_liveblog(f"Radarr geeft een fout terug tijdens mijn controle: {error}", "failed")
         push_liveblog(next_check_text(config), "waiting")
-        return
+        return False
 
     active_item = latest_active_item(rows)
     if drip_mode == "sync" and active_item:
@@ -1524,10 +1635,10 @@ def process_once(force=False):
             write_queue(rows)
             if refresh_run_history(config, rows):
                 save_config(config)
-        return
+        return True
 
     max_items = int(config["app"].get("maxItemsPerRun", 1))
-    selected = [row for row in rows if row["status"] == "todo"][:max_items]
+    selected = [row for row in rows if row["status"] == "todo" and (force or retry_is_due(row))][:max_items]
     if not selected:
         LAST_RUN.update({"at": utc_now(), "message": "No todo items."})
         push_liveblog("Geen nieuwe films klaar voor de volgende drip. Rustige wachtstand.", "idle")
@@ -1536,31 +1647,34 @@ def process_once(force=False):
             write_queue(rows)
             if refresh_run_history(config, rows):
                 save_config(config)
-        return
+        return True
 
     for item in selected:
         try:
             if item["type"] == "movie":
                 payload = radarr_payload(config, item)
                 push_liveblog(f"Radarr is oké; {item['title']} wordt klaargezet om te downloaden.", "adding")
-                if radarr_has_tmdb(config, payload["tmdbId"]):
-                    item["status"] = "skipped"
-                    item["error"] = "Already exists in Radarr (duplicate prevented)."
+                existing_movie = radarr_find_tmdb(config, payload["tmdbId"])
+                if existing_movie:
+                    item["radarrMovieId"] = str(existing_movie.get("id") or "")
+                    transition_item(item, "skipped", "Already exists in Radarr (duplicate prevented).")
                     item["addedAt"] = utc_now()
                     changed = True
                     LAST_RUN.update({"at": item["addedAt"], "message": f"Skipped (already present): {item['title']}"})
                     push_liveblog(f"{item['title']} staat al in Radarr. Netjes overgeslagen.", "skipped")
                     push_event("skipped", item["title"], "Already exists in Radarr")
                     continue
-                service_request(config["radarr"], "POST", "/movie", payload)
+                created_movie = service_request(config["radarr"], "POST", "/movie", payload)
+                if isinstance(created_movie, dict):
+                    item["tmdbId"] = str(created_movie.get("tmdbId") or payload["tmdbId"])
+                    item["radarrMovieId"] = str(created_movie.get("id") or "")
             elif item["type"] == "series":
                 if not config.get("sonarr", {}).get("enabled", False):
                     raise RuntimeError("Sonarr is disabled in settings.")
                 payload = sonarr_payload(config, item)
                 tvdb_id = payload.get("tvdbId")
                 if tvdb_id and sonarr_has_tvdb(config, int(tvdb_id)):
-                    item["status"] = "skipped"
-                    item["error"] = "Already exists in Sonarr (duplicate prevented)."
+                    transition_item(item, "skipped", "Already exists in Sonarr (duplicate prevented).")
                     item["addedAt"] = utc_now()
                     changed = True
                     LAST_RUN.update({"at": item["addedAt"], "message": f"Skipped (already present): {item['title']}"})
@@ -1570,9 +1684,10 @@ def process_once(force=False):
                 service_request(config["sonarr"], "POST", "/series", payload)
             else:
                 raise RuntimeError(f"Unknown media type: {item['type']}")
-            item["status"] = "active"
+            transition_item(item, "active", "")
             item["addedAt"] = utc_now()
-            item["error"] = ""
+            item["retryCount"] = "0"
+            item["nextRetryAt"] = ""
             changed = True
             LAST_RUN.update({"at": item["addedAt"], "message": f"Added: {item['title']}"})
             if item["type"] == "movie":
@@ -1592,16 +1707,19 @@ def process_once(force=False):
         except RuntimeError as error:
             error_text = str(error)
             if "IMDb ID could not be processed" in error_text or "IMDb ID kon niet worden verwerkt" in error_text:
-                item["status"] = "skipped"
-                item["error"] = f"Unresolvable: {error_text}"
+                transition_item(item, "skipped", f"Unresolvable: {error_text}")
                 item["addedAt"] = utc_now()
                 changed = True
                 LAST_RUN.update({"at": item["addedAt"], "message": f"Skipped (unresolvable): {item['title']}"})
                 push_liveblog(f"{item['title']} kan niet goed aan Radarr gekoppeld worden. Overgeslagen zodat de wachtrij doorloopt.", "skipped_no_indexer")
                 push_event("skipped", item["title"], "Unresolvable IMDb mapping")
+            elif is_transient_service_error(error_text) and schedule_item_retry(item, config, error_text):
+                changed = True
+                LAST_RUN.update({"at": utc_now(), "message": f"Temporary error for {item['title']}; retry scheduled."})
+                push_liveblog(f"Tijdelijke storing voor {item['title']}; Driparr probeert het automatisch opnieuw.", "waiting")
+                push_event("warning", item["title"], item["error"])
             else:
-                item["status"] = "failed"
-                item["error"] = error_text
+                transition_item(item, "failed", error_text)
                 changed = True
                 LAST_RUN.update({"at": utc_now(), "message": f"Error for {item['title']}: {error}"})
                 push_liveblog(f"Er ging iets mis met {item['title']}: {error_text}", "failed")
@@ -1619,6 +1737,7 @@ def process_once(force=False):
             except Exception:
                 pass
         save_config(config)
+    return True
 
 
 def worker_loop(max_cycles=None, sleep_fn=time.sleep):
@@ -1630,9 +1749,11 @@ def worker_loop(max_cycles=None, sleep_fn=time.sleep):
         try:
             WORKER_STATE["lastHeartbeat"] = utc_now()
             config = read_config()
-            if config["app"].get("workerEnabled"):
+            get_store().backup_if_due(retention=int(config.get("app", {}).get("backupRetention", 14)))
+            if config["app"].get("workerEnabled") and not maintenance_mode():
                 with LOCK:
-                    process_once()
+                    if process_once() is False:
+                        raise RuntimeError("Processing cycle could not reach Radarr; automatic retry scheduled.")
 
             if config["app"].get("dripMode", "sync") == "sync":
                 sleep_seconds = env_sync_poll_seconds()
@@ -1645,6 +1766,7 @@ def worker_loop(max_cycles=None, sleep_fn=time.sleep):
                 push_event("info", "Worker recovered", "Automatic processing resumed after an error.")
                 push_liveblog("De automatische worker is hersteld en verwerkt de wachtrij weer.", "optimistic")
             WORKER_STATE["consecutiveFailures"] = 0
+            WORKER_STATE["lastSuccessAt"] = utc_now()
         except Exception as error:
             error_text = f"{type(error).__name__}: {error}"
             WORKER_STATE["lastError"] = error_text
@@ -1658,15 +1780,31 @@ def worker_loop(max_cycles=None, sleep_fn=time.sleep):
             )
             print("Driparr worker iteration failed; retrying automatically.", flush=True)
             traceback.print_exc()
+            try:
+                app_cfg = config.get("app", {})
+            except (NameError, AttributeError):
+                app_cfg = {}
+            base = max(5, int(app_cfg.get("retryBaseSeconds", 30)))
+            cap = max(base, int(app_cfg.get("retryMaxSeconds", 900)))
+            sleep_seconds = min(cap, base * (2 ** min(WORKER_STATE["consecutiveFailures"] - 1, 8)))
 
         cycles += 1
         if max_cycles is not None and cycles >= max_cycles:
             WORKER_STATE["alive"] = False
             return
-        sleep_fn(max(1, int(sleep_seconds)))
+        sleep_seconds = max(1, int(sleep_seconds))
+        WORKER_STATE["nextRunAt"] = (datetime.now(timezone.utc) + timedelta(seconds=sleep_seconds)).isoformat()
+        sleep_fn(sleep_seconds)
 
 
 def issue_session(username):
+    cutoff = int(time.time()) - SESSION_TTL_SECONDS
+    for existing_token, session in list(SESSIONS.items()):
+        if int(session.get("issued", 0)) < cutoff:
+            SESSIONS.pop(existing_token, None)
+    if len(SESSIONS) >= 1000:
+        oldest = min(SESSIONS, key=lambda key: int(SESSIONS[key].get("issued", 0)))
+        SESSIONS.pop(oldest, None)
     token = secrets.token_urlsafe(24)
     issued = int(time.time())
     payload = f"{username}:{token}:{issued}"
@@ -1674,6 +1812,71 @@ def issue_session(username):
     session_id = f"{payload}:{signature}"
     SESSIONS[token] = {"username": username, "issued": issued}
     return session_id
+
+
+def csrf_token_for_session(session_id):
+    return hmac.new(
+        env_session_secret().encode("utf-8"),
+        f"csrf:{session_id}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def login_is_rate_limited(client_ip):
+    now = time.time()
+    attempts = [stamp for stamp in LOGIN_ATTEMPTS.get(client_ip, []) if now - stamp < 300]
+    LOGIN_ATTEMPTS[client_ip] = attempts
+    return len(attempts) >= 5
+
+
+def record_login_failure(client_ip):
+    LOGIN_ATTEMPTS.setdefault(client_ip, []).append(time.time())
+
+
+def clear_login_failures(client_ip):
+    LOGIN_ATTEMPTS.pop(client_ip, None)
+
+
+def worker_health_payload(config=None):
+    config = config or read_config()
+    app_cfg = config.get("app", {})
+    configured_enabled = bool(app_cfg.get("workerEnabled"))
+    enabled = configured_enabled and not maintenance_mode()
+    if app_cfg.get("dripMode", "sync") == "sync":
+        expected_seconds = env_sync_poll_seconds()
+    else:
+        expected_seconds = max(1, int(app_cfg.get("intervalMinutes", 60))) * 60
+    heartbeat = parse_iso_datetime(WORKER_STATE.get("lastHeartbeat"))
+    heartbeat_age = (datetime.now(timezone.utc) - heartbeat).total_seconds() if heartbeat else None
+    stale_after = expected_seconds + max(90, int(expected_seconds * 0.25))
+    worker_ok = bool(WORKER_STATE.get("alive")) and (
+        not enabled or (heartbeat_age is not None and heartbeat_age <= stale_after)
+    )
+    try:
+        storage = get_store().health()
+        storage_ok = bool(storage.get("ok"))
+    except Exception as error:
+        storage = {"ok": False, "error": str(error)}
+        storage_ok = False
+    return {
+        "ok": worker_ok and storage_ok,
+        "status": "healthy" if worker_ok and storage_ok else "degraded",
+        "version": APP_VERSION,
+        "worker": {
+            "enabled": enabled,
+            "configuredEnabled": configured_enabled,
+            "maintenanceMode": maintenance_mode(),
+            "alive": bool(WORKER_STATE.get("alive")),
+            "lastHeartbeat": WORKER_STATE.get("lastHeartbeat"),
+            "lastSuccessAt": WORKER_STATE.get("lastSuccessAt"),
+            "nextRunAt": WORKER_STATE.get("nextRunAt"),
+            "lastError": WORKER_STATE.get("lastError"),
+            "lastErrorAt": WORKER_STATE.get("lastErrorAt"),
+            "consecutiveFailures": int(WORKER_STATE.get("consecutiveFailures") or 0),
+            "heartbeatAgeSeconds": round(heartbeat_age, 1) if heartbeat_age is not None else None,
+        },
+        "storage": storage,
+    }
 
 
 def validate_session(session_id):
@@ -1742,17 +1945,9 @@ def settings_form(name, values, include_actions=True):
 </div>{actions}</div>"""
 
 
-def page(config, queue):
+def page(config, queue, csrf_token=""):
     def connected(service_cfg):
-        if not service_cfg.get("enabled"):
-            return False
-        if not service_cfg.get("url") or not service_cfg.get("apiKey"):
-            return False
-        try:
-            service_request(service_cfg, "GET", "/system/status")
-            return True
-        except Exception:
-            return False
+        return bool(service_cfg.get("enabled") and service_cfg.get("url") and service_cfg.get("apiKey"))
 
     radarr_connected = connected(config.get("radarr", {}))
     sonarr_connected = connected(config.get("sonarr", {}))
@@ -2060,6 +2255,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
           <span class=\"switch-slider\"></span>
         </label>
         <small id=\"workerStateText\" class=\"state-pill\" data-i18n=\"worker_state_on\">Start</small>
+        <small id=\"workerRuntime\" class=\"queue-meta\">Runtime: starting</small>
       </div>
       <span id=\"queueMeta\" class=\"queue-meta\">Queue: {len(queue)} items</span>
       <button class=\"btn secondary\" onclick=\"forceNext()\" {'disabled' if len(queue) == 0 else ''}>Check Radarr</button>
@@ -2084,6 +2280,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 <div id=\"onboardingModal\" class=\"modal-backdrop{' open' if show_onboarding else ''}\"><div class=\"modal-card\"><div class=\"modal-head\"><b data-i18n=\"onboarding_title\">Quick Start Checklist</b><button class=\"modal-close\" onclick=\"dismissOnboarding()\">×</button></div><div class=\"modal-body\"><p class=\"sub\" data-i18n=\"onboarding_sub\">Follow these steps once and you're ready.</p><ol class=\"onboarding-list\"><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-link\" src=\"/assets/link.svg\" alt=\"link\"><span data-i18n=\"onboarding_1\">Connect Radarr.</span></div><span class=\"onb-check {'done' if step1_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-add\" src=\"/assets/add.svg\" alt=\"add\"><span data-i18n=\"onboarding_2\">Import an IMDb CSV list.</span></div><span class=\"onb-check {'done' if step2_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-drip\" src=\"/assets/water-drop.svg\" alt=\"drip\"><span data-i18n=\"onboarding_3\">Choose drip mode (timed or sync) and interval.</span></div><span class=\"onb-check {'done' if step3_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li><li><div class=\"onboarding-item-left\"><img class=\"onb-icon onb-toggle\" src=\"/assets/toggle.svg\" alt=\"toggle\"><span data-i18n=\"onboarding_4\">Enable worker and monitor the timeline.</span></div><span class=\"onb-check {'done' if step4_done else ''}\"><img src=\"/assets/check.svg\" alt=\"done\"></span></li></ol><div class=\"onboarding-setup\"><div class=\"grid\"><div><label>Radarr URL *</label><input id=\"obRadarrUrl\" value=\"{html.escape(config.get('radarr', {}).get('url',''))}\" placeholder=\"http://radarr:7878\"><div id=\"obRadarrUrlError\" class=\"field-error\"></div></div><div><label>Radarr API key *</label><input id=\"obRadarrApi\" type=\"password\" autocomplete=\"off\" value=\"{html.escape(config.get('radarr', {}).get('apiKey',''))}\" placeholder=\"API key\"><div id=\"obRadarrApiError\" class=\"field-error\"></div></div></div><div class=\"grid\"><div><label>Quality Profile</label><select id=\"obRadarrQuality\" disabled><option value=\"\">Test first...</option></select><div id=\"obQualityStatus\" class=\"ob-status\">Test the connection first to fetch profiles.</div></div><div class=\"ob-inline\"><button class=\"btn secondary\" type=\"button\" onclick=\"testOnboardingRadarr()\">Test</button></div></div></div><p class=\"slogan\" data-i18n=\"set_and_forget\">Set and forget.</p></div><div class=\"modal-foot\"><span></span><button class=\"btn onboarding-save\" onclick=\"saveOnboardingSetup()\">Save</button></div></div></div>
 <div id=\"toast\" class=\"toast\"></div>
 <script>
+const DRIPARR_CSRF_TOKEN = {json.dumps(csrf_token)};
 function openTab(tabId) {{ document.querySelectorAll('nav button').forEach(b => b.classList.remove('active')); document.querySelectorAll('.tab').forEach(t => t.classList.remove('active')); const btn = document.querySelector(`nav button[data-tab="${{tabId}}"]`); if (btn) btn.classList.add('active'); const tab = document.getElementById(tabId); if (tab) tab.classList.add('active'); }}
 function openModal(id) {{
   const m=document.getElementById(id);
@@ -2499,6 +2696,14 @@ async function pollDashboardTimeline() {{
     const response = await fetch('/api/dashboard-timeline', {{headers:{{Accept:'application/json'}}}});
     if (!response.ok) return;
     const data = await response.json();
+    const runtime = document.getElementById('workerRuntime');
+    if (runtime && data.workerHealth) {{
+      const worker = data.workerHealth.worker || {{}};
+      runtime.textContent = data.workerHealth.ok
+        ? `Runtime: healthy${{worker.lastSuccessAt ? ' · last cycle ' + formatTimelineTime(worker.lastSuccessAt) : ''}}`
+        : `Runtime: degraded${{worker.lastError ? ' · ' + worker.lastError : ''}}`;
+      runtime.style.color = data.workerHealth.ok ? '#2fdd8f' : '#ff6f8f';
+    }}
     preserveViewport(() => {{
       renderDashboardTimeline(data);
       renderQueueTable(data.queueRows || []);
@@ -2828,7 +3033,7 @@ function applyI18n() {{
 }}
 document.querySelectorAll('nav button[data-tab]').forEach(btn => btn.onclick = () => openTab(btn.dataset.tab));
 async function post(url, data) {{
-  const r = await fetch(url, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify(data)}});
+  const r = await fetch(url, {{method:'POST', headers:{{'Content-Type':'application/json','X-Driparr-CSRF':DRIPARR_CSRF_TOKEN}}, body:JSON.stringify(data)}});
   if (r.status===401) {{ location.href='/login'; return; }}
   let j = null;
   try {{
@@ -3275,6 +3480,15 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Location", location)
         self.send_header("Content-Type", f"{content_type}; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "same-origin")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+            "script-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'",
+        )
         if set_cookie:
             self.send_header("Set-Cookie", set_cookie)
         self.end_headers()
@@ -3321,8 +3535,20 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(302, "", location="/login")
         return True
 
+    def secure_cookie_suffix(self):
+        forwarded = self.headers.get("X-Forwarded-Proto", "").strip().lower()
+        forced = os.getenv("DRIPARR_SECURE_COOKIES", "").strip().lower() in {"1", "true", "yes"}
+        return "; Secure" if forced or forwarded == "https" else ""
+
     def do_GET(self):
         path = urlparse(self.path).path
+        if path == "/health":
+            try:
+                payload = worker_health_payload()
+                self.respond(200 if payload["ok"] else 503, json.dumps(payload), "application/json")
+            except Exception as error:
+                self.respond(503, json.dumps({"ok": False, "status": "unhealthy", "error": str(error)}), "application/json")
+            return
         if path.startswith("/rabbit-emoji/"):
             asset_name = Path(path.replace("/rabbit-emoji/", "", 1)).name
             asset_path = RABBIT_EMOJI / asset_name
@@ -3378,14 +3604,23 @@ class Handler(BaseHTTPRequestHandler):
             payload = dashboard_timeline_payload(config, queue)
             self.respond(200, json.dumps({"ok": True, **payload, "queueRows": queue_table_payload(queue)}), "application/json")
             return
+        if path == "/api/worker-health":
+            payload = worker_health_payload(config)
+            self.respond(200 if payload["ok"] else 503, json.dumps(payload), "application/json")
+            return
         if path == "/setup":
             self.respond(302, "", location="/")
             return
         queue = read_queue()
-        self.respond(200, page(config, queue))
+        self.respond(200, page(config, queue, csrf_token_for_session(self.session_cookie())))
 
     def do_HEAD(self):
         path = urlparse(self.path).path
+        if path == "/health":
+            payload = worker_health_payload()
+            self.send_response(200 if payload["ok"] else 503)
+            self.end_headers()
+            return
         if path.startswith("/assets/"):
             asset_name = Path(path.replace("/assets/", "", 1)).name
             asset_path = ASSETS / asset_name
@@ -3420,15 +3655,26 @@ class Handler(BaseHTTPRequestHandler):
             form = self.read_form()
             username = form.get("username", "")
             password = form.get("password", "")
+            client_ip = self.client_address[0]
+            if login_is_rate_limited(client_ip):
+                self.respond(429, login_page("Too many failed attempts. Try again in five minutes."))
+                return
             config = read_config()
             if verify_login(config, username, password):
+                clear_login_failures(client_ip)
                 session_id = issue_session(username)
-                cookie = f"driparr_session={session_id}; HttpOnly; Path=/; SameSite=Lax"
+                cookie = f"driparr_session={session_id}; HttpOnly; Path=/; SameSite=Lax{self.secure_cookie_suffix()}"
                 self.respond(302, "", set_cookie=cookie, location="/")
             else:
+                record_login_failure(client_ip)
                 self.respond(200, login_page("Invalid username or password."))
             return
         if path != "/login" and self.auth_required():
+            return
+        expected_csrf = csrf_token_for_session(self.session_cookie())
+        supplied_csrf = self.headers.get("X-Driparr-CSRF", "")
+        if path.startswith("/api/") and not hmac.compare_digest(expected_csrf, supplied_csrf):
+            self.respond(403, json.dumps({"ok": False, "message": "Invalid CSRF token."}), "application/json")
             return
 
         try:
@@ -3640,23 +3886,63 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/logout":
-                self.respond(200, json.dumps({"ok": True, "message": "Logged out."}), "application/json", set_cookie="driparr_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
+                self.respond(200, json.dumps({"ok": True, "message": "Logged out."}), "application/json", set_cookie=f"driparr_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax{self.secure_cookie_suffix()}")
                 return
 
             self.respond(404, json.dumps({"ok": False, "message": "Not found."}), "application/json")
-        except Exception as error:
-            self.respond(500, json.dumps({"ok": False, "message": str(error)}), "application/json")
+        except RuntimeError as error:
+            status = 502 if is_transient_service_error(str(error)) else 400
+            self.respond(status, json.dumps({"ok": False, "message": str(error)}), "application/json")
+        except (TypeError, ValueError, KeyError) as error:
+            self.respond(400, json.dumps({"ok": False, "message": str(error)}), "application/json")
+        except Exception:
+            error_id = secrets.token_hex(6)
+            print(f"Unhandled request error {error_id}", flush=True)
+            traceback.print_exc()
+            self.respond(500, json.dumps({"ok": False, "message": f"Internal server error ({error_id})."}), "application/json")
 
     def log_message(self, fmt, *args):
-        print(f"{self.address_string()} - {fmt % args}")
+        request_line = str(args[0]) if args else ""
+        if "/api/liveblog " in request_line or "/api/dashboard-timeline " in request_line:
+            return
+        print(
+            json.dumps(
+                {
+                    "at": utc_now(),
+                    "client": self.address_string(),
+                    "request": request_line,
+                    "status": args[1] if len(args) > 1 else "",
+                    "bytes": args[2] if len(args) > 2 else "",
+                }
+            ),
+            flush=True,
+        )
+
+
+class DriparrHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+    request_queue_size = 32
+
+
+def validate_startup_security(config):
+    if allow_insecure_defaults():
+        return
+    weak_secrets = {"", "replace-me", "change-this-random-secret", "CHANGE_ME_RANDOM_SECRET"}
+    if env_session_secret() in weak_secrets:
+        raise RuntimeError("DRIPARR_SESSION_SECRET must be changed before startup.")
+    weak_passwords = {"", "admin", "change-this-password", "CHANGE_ME_STRONG_PASSWORD"}
+    if not app_account_configured(config) and env_admin_password() in weak_passwords:
+        raise RuntimeError("DRIPARR_ADMIN_PASSWORD must be changed before startup.")
 
 
 def main():
     ensure_data()
+    validate_startup_security(read_config())
     threading.Thread(target=worker_loop, daemon=True).start()
-    server = ThreadingHTTPServer(("0.0.0.0", 8080), Handler)
-    print("Driparr webinterface draait op poort 8080.")
-    server.serve_forever()
+    server = DriparrHTTPServer(("0.0.0.0", 8080), Handler)
+    print("Driparr webinterface draait op poort 8080.", flush=True)
+    server.serve_forever(poll_interval=0.5)
 
 
 if __name__ == "__main__":
