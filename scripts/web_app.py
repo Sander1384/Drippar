@@ -8,6 +8,7 @@ import re
 import secrets
 import threading
 import time
+import traceback
 from datetime import datetime, timedelta, timezone
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -27,6 +28,14 @@ ACTIVE_STATUSES = {"active", "added"}
 SKIPPED_STATUSES = {"skipped", "skipped_no_indexer"}
 LOCK = threading.Lock()
 LAST_RUN = {"at": None, "message": "Worker has not started yet."}
+WORKER_STATE = {
+    "alive": False,
+    "lastHeartbeat": None,
+    "lastError": "",
+    "lastErrorAt": None,
+    "consecutiveFailures": 0,
+    "recoveredAt": None,
+}
 LAST_EVENTS = []
 LIVEBLOG = []
 AMBIENT_INDEX = 0
@@ -35,7 +44,7 @@ SESSIONS = {}
 SESSION_TTL_SECONDS = 60 * 60 * 12
 MAX_REQUEST_BYTES = 2 * 1024 * 1024
 MAX_CSV_CHARS = 2 * 1024 * 1024
-APP_VERSION_FALLBACK = "0.1.18"
+APP_VERSION_FALLBACK = "0.1.19"
 
 
 def detect_app_version():
@@ -528,8 +537,9 @@ def service_request(service, method, path, payload=None):
     except HTTPError as error:
         body = error.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"HTTP {error.code}: {body}") from error
-    except URLError as error:
-        raise RuntimeError(f"Not reachable: {error.reason}") from error
+    except (URLError, TimeoutError, ConnectionError, OSError) as error:
+        reason = getattr(error, "reason", error)
+        raise RuntimeError(f"Not reachable: {reason}") from error
     except ValueError as error:
         raise RuntimeError(f"Invalid URL or port: {base_url}") from error
 
@@ -1611,18 +1621,49 @@ def process_once(force=False):
         save_config(config)
 
 
-def worker_loop():
+def worker_loop(max_cycles=None, sleep_fn=time.sleep):
     ensure_data()
+    WORKER_STATE["alive"] = True
+    cycles = 0
     while True:
-        config = read_config()
-        if config["app"].get("workerEnabled"):
-            with LOCK:
-                process_once()
-        if config["app"].get("dripMode", "sync") == "sync":
-            time.sleep(env_sync_poll_seconds())
-        else:
-            interval = max(1, int(config["app"].get("intervalMinutes", 60)))
-            time.sleep(interval * 60)
+        sleep_seconds = 60
+        try:
+            WORKER_STATE["lastHeartbeat"] = utc_now()
+            config = read_config()
+            if config["app"].get("workerEnabled"):
+                with LOCK:
+                    process_once()
+
+            if config["app"].get("dripMode", "sync") == "sync":
+                sleep_seconds = env_sync_poll_seconds()
+            else:
+                interval = max(1, int(config["app"].get("intervalMinutes", 60)))
+                sleep_seconds = interval * 60
+
+            if WORKER_STATE["consecutiveFailures"]:
+                WORKER_STATE["recoveredAt"] = utc_now()
+                push_event("info", "Worker recovered", "Automatic processing resumed after an error.")
+                push_liveblog("De automatische worker is hersteld en verwerkt de wachtrij weer.", "optimistic")
+            WORKER_STATE["consecutiveFailures"] = 0
+        except Exception as error:
+            error_text = f"{type(error).__name__}: {error}"
+            WORKER_STATE["lastError"] = error_text
+            WORKER_STATE["lastErrorAt"] = utc_now()
+            WORKER_STATE["consecutiveFailures"] += 1
+            LAST_RUN.update({"at": utc_now(), "message": f"Worker error; retrying automatically: {error_text}"})
+            push_event("failed", "Worker error", f"{error_text}. Retrying automatically.")
+            push_liveblog(
+                f"De automatische controle liep tegen een tijdelijke fout aan: {error_text}. Over ongeveer een minuut probeer ik het opnieuw.",
+                "failed",
+            )
+            print("Driparr worker iteration failed; retrying automatically.", flush=True)
+            traceback.print_exc()
+
+        cycles += 1
+        if max_cycles is not None and cycles >= max_cycles:
+            WORKER_STATE["alive"] = False
+            return
+        sleep_fn(max(1, int(sleep_seconds)))
 
 
 def issue_session(username):

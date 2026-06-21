@@ -1,3 +1,18 @@
+# Driparr v0.1.19
+
+Worker resilience release for Driparr.
+
+## Reliability fix
+
+- Radarr socket timeouts are converted to recoverable service errors.
+- The automatic worker now catches unexpected iteration failures, records the error, and retries automatically.
+- A successful retry records that the worker recovered instead of silently remaining stalled.
+- Added regression tests for Radarr timeouts and worker recovery.
+
+This fixes an issue where a temporary timeout during IMDb-to-TMDb lookup could terminate the background worker while the web interface continued to appear healthy.
+
+---
+
 # Driparr v0.1.18
 
 Dashboard clarity release for Driparr.
