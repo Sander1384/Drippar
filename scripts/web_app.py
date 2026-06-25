@@ -49,7 +49,7 @@ LOGIN_ATTEMPTS = {}
 SESSION_TTL_SECONDS = 60 * 60 * 12
 MAX_REQUEST_BYTES = 2 * 1024 * 1024
 MAX_CSV_CHARS = 2 * 1024 * 1024
-APP_VERSION_FALLBACK = "0.2.0"
+APP_VERSION_FALLBACK = "0.2.1"
 STORE = None
 
 
@@ -3292,6 +3292,7 @@ function importImdbCsvFile() {{
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/import-csv');
     xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.setRequestHeader('X-Driparr-CSRF', DRIPARR_CSRF_TOKEN);
     xhr.upload.onprogress = (ev) => {{
       if (!ev.lengthComputable) return;
       const p = 45 + (ev.loaded / ev.total) * 50;

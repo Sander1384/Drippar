@@ -1,3 +1,8 @@
+# Driparr v0.2.1
+
+- Fixes IMDb CSV upload after CSRF hardening by sending the session-bound CSRF token with the upload request.
+- Adds a regression test so the CSV upload cannot silently bypass the shared POST helper again.
+
 # Driparr v0.2.0
 
 Reliability foundation release for Driparr.

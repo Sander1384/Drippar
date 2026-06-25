@@ -53,6 +53,11 @@ class AppCoreTests(unittest.TestCase):
             self.assertEqual(web_app.csrf_token_for_session("a"), web_app.csrf_token_for_session("a"))
             self.assertNotEqual(web_app.csrf_token_for_session("a"), web_app.csrf_token_for_session("b"))
 
+    def test_csv_upload_xhr_sends_csrf_header(self):
+        app_html = web_app.page(web_app.default_config(), [], csrf_token="test-csrf-token")
+        self.assertIn("xhr.open('POST', '/api/import-csv');", app_html)
+        self.assertIn("xhr.setRequestHeader('X-Driparr-CSRF', DRIPARR_CSRF_TOKEN);", app_html)
+
 
 if __name__ == "__main__":
     unittest.main()
