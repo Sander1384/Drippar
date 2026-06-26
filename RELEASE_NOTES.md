@@ -1,3 +1,8 @@
+# Driparr v0.2.3
+
+- Automatically releases a sync-mode movie when Radarr only has an old grabbed-history record and no live download/import queue entry for ten minutes.
+- Prevents orphaned qBittorrent/Radarr downloads from blocking every later drip indefinitely.
+
 # Driparr v0.2.2
 
 - Adds a per-list movie storage picker backed by Radarr's accessible root folders.

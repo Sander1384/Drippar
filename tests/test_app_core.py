@@ -78,6 +78,37 @@ class AppCoreTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "not an accessible"):
                 web_app.selected_movie_root_folder(config, "/unknown")
 
+    def test_stale_grab_without_live_queue_is_released(self):
+        item = {
+            "externalId": "imdb:tt1234567",
+            "tmdbId": "42",
+            "radarrMovieId": "7",
+            "addedAt": (datetime.now(timezone.utc) - timedelta(minutes=11)).isoformat(),
+        }
+        movie = {"id": 7, "tmdbId": 42, "hasFile": False, "monitored": True, "status": "released"}
+        with patch.dict(web_app.os.environ, {"DRIPARR_STALE_GRAB_SKIP_SECONDS": "600"}, clear=False):
+            with patch.object(web_app, "service_request", return_value=[movie]):
+                with patch.object(web_app, "radarr_queue_records", return_value=[]):
+                    with patch.object(web_app, "radarr_history_records", return_value=[{"eventType": "grabbed", "movieId": 7}]):
+                        result = web_app.radarr_movie_status({"radarr": {}}, item)
+        self.assertEqual(result["state"], "skipped_no_indexer")
+        self.assertIn("automatisch vrijgegeven", result["reason"])
+
+    def test_recent_grab_without_live_queue_stays_active_briefly(self):
+        item = {
+            "externalId": "imdb:tt1234567",
+            "tmdbId": "42",
+            "radarrMovieId": "7",
+            "addedAt": datetime.now(timezone.utc).isoformat(),
+        }
+        movie = {"id": 7, "tmdbId": 42, "hasFile": False, "monitored": True, "status": "released"}
+        with patch.dict(web_app.os.environ, {"DRIPARR_STALE_GRAB_SKIP_SECONDS": "600"}, clear=False):
+            with patch.object(web_app, "service_request", return_value=[movie]):
+                with patch.object(web_app, "radarr_queue_records", return_value=[]):
+                    with patch.object(web_app, "radarr_history_records", return_value=[{"eventType": "grabbed", "movieId": 7}]):
+                        result = web_app.radarr_movie_status({"radarr": {}}, item)
+        self.assertEqual(result["state"], "active")
+
 
 if __name__ == "__main__":
     unittest.main()

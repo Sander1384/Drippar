@@ -49,7 +49,7 @@ LOGIN_ATTEMPTS = {}
 SESSION_TTL_SECONDS = 60 * 60 * 12
 MAX_REQUEST_BYTES = 2 * 1024 * 1024
 MAX_CSV_CHARS = 2 * 1024 * 1024
-APP_VERSION_FALLBACK = "0.2.2"
+APP_VERSION_FALLBACK = "0.2.3"
 STORE = None
 
 
@@ -347,6 +347,14 @@ def env_no_download_skip_seconds():
         return max(15, int(os.getenv("DRIPARR_NO_DOWNLOAD_SKIP_SECONDS", "60") or "60"))
     except ValueError:
         return 60
+
+
+def env_stale_grab_skip_seconds():
+    """How long a historical grab may block sync mode without a live queue entry."""
+    try:
+        return max(60, int(os.getenv("DRIPARR_STALE_GRAB_SKIP_SECONDS", "600") or "600"))
+    except ValueError:
+        return 600
 
 
 def hash_password(password, salt):
@@ -1272,7 +1280,7 @@ def movie_is_completed_in_radarr(config, item):
 
 def radarr_movie_status(config, item):
     item["lastCheckedAt"] = utc_now()
-    age_minutes = minutes_since(item.get("addedAt"))
+    age_minutes = minutes_since(item.get("addedAt") or item.get("stateChangedAt"))
     skip_after_minutes = env_no_download_skip_seconds() / 60
     tmdb_id = movie_tmdb_id(config, item)
     if not tmdb_id:
@@ -1307,6 +1315,15 @@ def radarr_movie_status(config, item):
     if history_has_failed_download(history):
         return {"state": "skipped_no_indexer", "reason": "Radarr meldt dat de download is mislukt of genegeerd."}
     if history_has_grab_or_import(history):
+        stale_grab_minutes = env_stale_grab_skip_seconds() / 60
+        if age_minutes is not None and age_minutes >= stale_grab_minutes:
+            return {
+                "state": "skipped_no_indexer",
+                "reason": (
+                    f"Radarr heeft {env_stale_grab_skip_seconds()} seconden lang geen actieve download of import "
+                    "meer gemeld na een gegrepen release; de vastgelopen drip is automatisch vrijgegeven."
+                ),
+            }
         return {"state": "active", "reason": "Radarr heeft een release gegrepen; ik wacht op download- of importstatus."}
 
     command_state, command = movie_search_command_state(radarr_command_records(config), movie)

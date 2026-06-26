@@ -138,7 +138,7 @@ Create `docker-compose.yml`:
 ```yaml
 services:
   driparr:
-    image: ghcr.io/sander1384/driparr:v0.2.2
+    image: ghcr.io/sander1384/driparr:v0.2.3
     container_name: driparr
     restart: unless-stopped
     ports:
