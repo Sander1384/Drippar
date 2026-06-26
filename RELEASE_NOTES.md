@@ -1,3 +1,9 @@
+# Driparr v0.2.2
+
+- Adds a per-list movie storage picker backed by Radarr's accessible root folders.
+- Stores the selected root folder on every queued movie, so films added from separate lists keep their intended destination.
+- Adds a safe SQLite migration for the new queue field and validates every selected destination against Radarr.
+
 # Driparr v0.2.1
 
 - Fixes IMDb CSV upload after CSRF hardening by sending the session-bound CSRF token with the upload request.

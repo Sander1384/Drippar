@@ -58,6 +58,26 @@ class AppCoreTests(unittest.TestCase):
         self.assertIn("xhr.open('POST', '/api/import-csv');", app_html)
         self.assertIn("xhr.setRequestHeader('X-Driparr-CSRF', DRIPARR_CSRF_TOKEN);", app_html)
 
+    def test_movie_root_folder_is_stored_per_queue_item(self):
+        config = web_app.default_config()
+        with patch.object(web_app, "build_radarr_movie_index", return_value={"imdb": set(), "tmdb": set(), "title_year": set()}):
+            with patch.object(web_app, "write_queue") as write_queue:
+                with patch.object(web_app, "read_queue", return_value=[]):
+                    web_app.enqueue_ids(config, "movie", "imdb", ["tt1234567"], "Animation", "/Disney")
+        self.assertEqual(write_queue.call_args.args[0][0]["rootFolderPath"], "/Disney")
+
+    def test_radarr_payload_uses_item_root_folder(self):
+        config = web_app.default_config()
+        item = {"externalId": "imdb:tt1234567", "tmdbId": "1", "rootFolderPath": "/Disney"}
+        self.assertEqual(web_app.radarr_payload(config, item)["rootFolderPath"], "/Disney")
+
+    def test_selected_movie_root_must_be_known_to_radarr(self):
+        config = web_app.default_config()
+        with patch.object(web_app, "radarr_root_folders", return_value=["/movies", "/Disney"]):
+            self.assertEqual(web_app.selected_movie_root_folder(config, "/Disney"), "/Disney")
+            with self.assertRaisesRegex(RuntimeError, "not an accessible"):
+                web_app.selected_movie_root_folder(config, "/unknown")
+
 
 if __name__ == "__main__":
     unittest.main()

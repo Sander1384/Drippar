@@ -49,7 +49,7 @@ LOGIN_ATTEMPTS = {}
 SESSION_TTL_SECONDS = 60 * 60 * 12
 MAX_REQUEST_BYTES = 2 * 1024 * 1024
 MAX_CSV_CHARS = 2 * 1024 * 1024
-APP_VERSION_FALLBACK = "0.2.1"
+APP_VERSION_FALLBACK = "0.2.2"
 STORE = None
 
 
@@ -453,6 +453,9 @@ def read_config():
         app_cfg["adminPasswordHash"] = ""
     if "adminPasswordSalt" not in app_cfg:
         app_cfg["adminPasswordSalt"] = ""
+    radarr_cfg = config.setdefault("radarr", {})
+    if "rootFolderPath" not in radarr_cfg:
+        radarr_cfg["rootFolderPath"] = "/movies"
     app_cfg["intervalMinutes"] = safe_int(app_cfg.get("intervalMinutes"), 60, minimum=1, maximum=24 * 60)
     app_cfg["maxItemsPerRun"] = safe_int(app_cfg.get("maxItemsPerRun"), 1, minimum=1, maximum=50)
     app_cfg["maxWorkerRetries"] = safe_int(app_cfg.get("maxWorkerRetries"), 5, minimum=1, maximum=20)
@@ -464,6 +467,36 @@ def read_config():
     if json.dumps(config, sort_keys=True, default=str) != before:
         get_store().save_config(config)
     return config
+
+
+def radarr_root_folders(config):
+    """Return accessible Radarr root folders without exposing credentials."""
+    radarr = config.get("radarr", {})
+    if not radarr.get("url") or not radarr.get("apiKey"):
+        return []
+    folders = service_request(radarr, "GET", "/rootfolder")
+    return [
+        str(folder.get("path", "")).strip()
+        for folder in folders
+        if isinstance(folder, dict)
+        and str(folder.get("path", "")).strip()
+        and folder.get("accessible", True)
+    ]
+
+
+def selected_movie_root_folder(config, requested_path):
+    configured = str(config.get("radarr", {}).get("rootFolderPath", "")).strip()
+    selected = str(requested_path or configured).strip()
+    if not selected:
+        raise RuntimeError("Choose a Radarr root folder before importing movies.")
+    try:
+        allowed = radarr_root_folders(config)
+    except RuntimeError:
+        # A temporary Radarr outage must not block an import to the already configured root.
+        allowed = [configured] if configured else []
+    if selected not in allowed:
+        raise RuntimeError("The selected storage location is not an accessible Radarr root folder.")
+    return selected
 
 
 def queue_stats_for_source(rows, source_name):
@@ -707,7 +740,7 @@ def build_radarr_movie_index(config):
     return {"tmdb": by_tmdb, "imdb": by_imdb, "title_year": by_title_year}
 
 
-def enqueue_ids(config, media_type, id_kind, ids, source_name):
+def enqueue_ids(config, media_type, id_kind, ids, source_name, root_folder_path=""):
     rows = read_queue()
     existing = {(row["type"], row["externalId"]) for row in rows}
     radarr_cfg = config.get("radarr", {})
@@ -782,6 +815,7 @@ def enqueue_ids(config, media_type, id_kind, ids, source_name):
                 "nextRetryAt": "",
                 "stateChangedAt": utc_now(),
                 "lastCheckedAt": "",
+                "rootFolderPath": root_folder_path if media_type == "movie" else "",
             }
         )
         existing.add(key)
@@ -790,7 +824,7 @@ def enqueue_ids(config, media_type, id_kind, ids, source_name):
     return added
 
 
-def import_list(source_type, url, media_type, name):
+def import_list(source_type, url, media_type, name, root_folder_path=""):
     config = read_config()
     if source_type == "tmdb":
         raise RuntimeError("TMDb import has been removed in this IMDb-only version.")
@@ -805,7 +839,7 @@ def import_list(source_type, url, media_type, name):
     if not ids:
         raise RuntimeError("No items found in this list. Check the URL/type and try again.")
 
-    return enqueue_ids(config, media_type, id_kind, ids, name or url)
+    return enqueue_ids(config, media_type, id_kind, ids, name or url, root_folder_path)
 
 
 def radarr_payload(config, item):
@@ -816,7 +850,7 @@ def radarr_payload(config, item):
     return {
         "tmdbId": int(value),
         "qualityProfileId": int(radarr["qualityProfileId"]),
-        "rootFolderPath": radarr["rootFolderPath"],
+        "rootFolderPath": item.get("rootFolderPath") or radarr["rootFolderPath"],
         "monitored": True,
         "minimumAvailability": radarr["minimumAvailability"],
         "addOptions": {"searchForMovie": bool(radarr["searchOnAdd"])},
@@ -2281,6 +2315,7 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ padding:10px; border-
 <div id=\"toast\" class=\"toast\"></div>
 <script>
 const DRIPARR_CSRF_TOKEN = {json.dumps(csrf_token)};
+const DEFAULT_MOVIE_ROOT = {json.dumps(str(config.get('radarr', {}).get('rootFolderPath', '')).strip())};
 function openTab(tabId) {{ document.querySelectorAll('nav button').forEach(b => b.classList.remove('active')); document.querySelectorAll('.tab').forEach(t => t.classList.remove('active')); const btn = document.querySelector(`nav button[data-tab="${{tabId}}"]`); if (btn) btn.classList.add('active'); const tab = document.getElementById(tabId); if (tab) tab.classList.add('active'); }}
 function openModal(id) {{
   const m=document.getElementById(id);
@@ -3228,7 +3263,28 @@ function updateDripModeUI() {{
 (() => {{ const v = Number(intervalMinutes.value); if ([10,15,30,60,90].includes(v)) intervalPreset.value = String(v); else intervalPreset.value = 'custom'; }})();
 (() => {{ dripMode.value = "{config['app'].get('dripMode','sync')}"; updateDripModeUI(); }})();
 dripMode.addEventListener('change', updateDripModeUI);
-function addList() {{ post('/api/lists', {{name:listName.value, type:listType.value, mediaType:listMedia.value, url:listUrl.value}}); }}
+function addList() {{ post('/api/lists', {{name:listName.value, type:listType.value, mediaType:listMedia.value, url:listUrl.value, rootFolderPath:document.getElementById('listRoot')?.value || ''}}); }}
+function installListRootPicker() {{
+  const media = document.getElementById('listMedia');
+  if (!media || document.getElementById('listRoot')) return;
+  const field = document.createElement('div');
+  field.id = 'listRootWrap';
+  field.innerHTML = '<label>Opslaglocatie voor films</label><select id="listRoot"></select><p class="sub" style="margin:6px 0 0">Kies de Radarr-rootfolder. Voor animatiefilms kies je <b>/Disney</b>.</p>';
+  media.closest('.grid')?.appendChild(field);
+  const select = field.querySelector('select');
+  const updateVisibility = () => {{ field.style.display = media.value === 'movie' ? '' : 'none'; }};
+  media.addEventListener('change', updateVisibility);
+  updateVisibility();
+  const addOption = (path, label) => {{ const option = document.createElement('option'); option.value = path; option.textContent = label || path; select.appendChild(option); }};
+  if (DEFAULT_MOVIE_ROOT) addOption(DEFAULT_MOVIE_ROOT, `Gewone films (huidige locatie: ${{DEFAULT_MOVIE_ROOT}})`);
+  post('/api/radarr/rootfolders', {{}}).then((result) => {{
+    if (!result.ok || !Array.isArray(result.folders) || !result.folders.length) return;
+    const selected = select.value || DEFAULT_MOVIE_ROOT;
+    select.innerHTML = '';
+    result.folders.forEach((path) => addOption(path, path === '/Disney' ? 'Animatiefilms — Disney Movie Collection (/Disney)' : (path === selected ? `Gewone films (huidige locatie: ${{path}})` : path)));
+    select.value = result.folders.includes(selected) ? selected : result.folders[0];
+  }}).catch(() => {{ /* The configured root remains usable when Radarr is temporarily offline. */ }});
+}}
 function validateListName() {{
   const name = (listName.value || '').trim();
   const err = document.getElementById('listNameError');
@@ -3287,6 +3343,7 @@ function importImdbCsvFile() {{
     const payload = JSON.stringify({{
       name: listName.value.trim(),
       mediaType: listMedia.value || 'movie',
+      rootFolderPath: document.getElementById('listRoot')?.value || '',
       csvText: String(reader.result || '')
     }});
     const xhr = new XMLHttpRequest();
@@ -3453,6 +3510,7 @@ if (languagePref) {{
 }}
 async function logout() {{ await post('/api/logout', {{}}); location.href='/login'; }}
 applyI18n();
+installListRootPicker();
 startRabbitMoodLoop();
 pollLiveblog();
 pollDashboardTimeline();
@@ -3697,6 +3755,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(200, json.dumps({"ok": True, **found}), "application/json")
                 return
 
+            if path == "/api/radarr/rootfolders":
+                self.respond(200, json.dumps({"ok": True, "folders": radarr_root_folders(config)}), "application/json")
+                return
+
             if path.startswith("/api/service/"):
                 name = path.split("/")[3]
                 config[name].update(data)
@@ -3747,9 +3809,11 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/lists":
+                root_folder_path = selected_movie_root_folder(config, data.get("rootFolderPath")) if data.get("mediaType") == "movie" else ""
+                data["rootFolderPath"] = root_folder_path
                 config["lists"].append(data)
                 save_config(config)
-                added = import_list(data["type"], data["url"], data["mediaType"], data.get("name", ""))
+                added = import_list(data["type"], data["url"], data["mediaType"], data.get("name", ""), root_folder_path)
                 self.respond(200, json.dumps({"ok": True, "message": f"{added} {pluralize(added, 'item')} imported.", "reload": True}), "application/json")
                 return
 
@@ -3769,6 +3833,7 @@ class Handler(BaseHTTPRequestHandler):
                 media_type = data.get("mediaType", "movie")
                 if media_type not in ("movie", "series"):
                     media_type = "movie"
+                root_folder_path = selected_movie_root_folder(config, data.get("rootFolderPath")) if media_type == "movie" else ""
                 list_name = str(data.get("name", "")).strip()
                 if not list_name:
                     raise RuntimeError("List name is required.")
@@ -3785,10 +3850,11 @@ class Handler(BaseHTTPRequestHandler):
                         "type": "imdb_csv",
                         "mediaType": media_type,
                         "url": "CSV import",
+                        "rootFolderPath": root_folder_path,
                     }
                 )
                 save_config(config)
-                added = enqueue_ids(config, media_type, "imdb", entries, list_name)
+                added = enqueue_ids(config, media_type, "imdb", entries, list_name, root_folder_path)
                 submitted = len(entries)
                 skipped_existing = max(0, submitted - int(added))
                 push_run_history(

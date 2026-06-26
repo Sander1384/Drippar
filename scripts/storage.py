@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 LEGACY_QUEUE_FIELDS = ["type", "externalId", "title", "status", "source", "addedAt", "error"]
 QUEUE_FIELDS = [
     *LEGACY_QUEUE_FIELDS,
@@ -20,6 +20,7 @@ QUEUE_FIELDS = [
     "nextRetryAt",
     "stateChangedAt",
     "lastCheckedAt",
+    "rootFolderPath",
 ]
 
 
@@ -82,7 +83,8 @@ class SQLiteStore:
                         retry_count INTEGER NOT NULL DEFAULT 0,
                         next_retry_at TEXT NOT NULL DEFAULT '',
                         state_changed_at TEXT NOT NULL DEFAULT '',
-                        last_checked_at TEXT NOT NULL DEFAULT ''
+                        last_checked_at TEXT NOT NULL DEFAULT '',
+                        root_folder_path TEXT NOT NULL DEFAULT ''
                     );
                     CREATE INDEX IF NOT EXISTS queue_status_position_idx
                         ON queue(status, position);
@@ -90,6 +92,7 @@ class SQLiteStore:
                         ON queue(media_type, external_id, source);
                     """
                 )
+                self._migrate_queue_schema(connection)
                 imported = connection.execute(
                     "SELECT value FROM metadata WHERE key = 'legacy_imported'"
                 ).fetchone()
@@ -214,8 +217,8 @@ class SQLiteStore:
                 INSERT INTO queue(
                     position, media_type, external_id, title, status, source, added_at,
                     error, tmdb_id, radarr_movie_id, retry_count, next_retry_at,
-                    state_changed_at, last_checked_at
-                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    state_changed_at, last_checked_at, root_folder_path
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     position,
@@ -232,6 +235,7 @@ class SQLiteStore:
                     row["nextRetryAt"],
                     row["stateChangedAt"],
                     row["lastCheckedAt"],
+                    row["rootFolderPath"],
                 ),
             )
 
@@ -250,11 +254,20 @@ class SQLiteStore:
             "nextRetryAt": row["next_retry_at"],
             "stateChangedAt": row["state_changed_at"],
             "lastCheckedAt": row["last_checked_at"],
+            "rootFolderPath": row["root_folder_path"],
         }
 
     @staticmethod
     def _normalize_queue_row(row):
         return {field: str((row or {}).get(field, "") or "") for field in QUEUE_FIELDS}
+
+    @staticmethod
+    def _migrate_queue_schema(connection):
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(queue)")}
+        if "root_folder_path" not in columns:
+            connection.execute(
+                "ALTER TABLE queue ADD COLUMN root_folder_path TEXT NOT NULL DEFAULT ''"
+            )
 
     def _export_compatibility_files(self):
         config = self.read_config()

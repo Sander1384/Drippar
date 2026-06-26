@@ -1,5 +1,6 @@
 import csv
 import json
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -59,11 +60,44 @@ class StorageTests(unittest.TestCase):
                 "nextRetryAt": "later",
                 "stateChangedAt": "now",
                 "lastCheckedAt": "now",
+                "rootFolderPath": "",
             }
             store.write_queue([row])
             loaded = store.read_queue()[0]
             self.assertEqual(loaded, row)
             self.assertEqual(store.health()["queueCount"], 1)
+            self.assertEqual(loaded["rootFolderPath"], "")
+
+    def test_existing_database_migrates_root_folder_column(self):
+        with tempfile.TemporaryDirectory() as temp:
+            db_path = Path(temp) / "driparr.db"
+            connection = sqlite3.connect(db_path)
+            try:
+                connection.executescript(
+                    """
+                    CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                    INSERT INTO metadata(key, value) VALUES('legacy_imported', 'true');
+                    CREATE TABLE queue (
+                        position INTEGER PRIMARY KEY, media_type TEXT NOT NULL,
+                        external_id TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL,
+                        source TEXT NOT NULL DEFAULT '', added_at TEXT NOT NULL DEFAULT '',
+                        error TEXT NOT NULL DEFAULT '', tmdb_id TEXT NOT NULL DEFAULT '',
+                        radarr_movie_id TEXT NOT NULL DEFAULT '', retry_count INTEGER NOT NULL DEFAULT 0,
+                        next_retry_at TEXT NOT NULL DEFAULT '', state_changed_at TEXT NOT NULL DEFAULT '',
+                        last_checked_at TEXT NOT NULL DEFAULT ''
+                    );
+                    INSERT INTO queue(position, media_type, external_id, title, status)
+                    VALUES(0, 'movie', 'imdb:tt1', 'Existing', 'todo');
+                    """
+                )
+                connection.commit()
+            finally:
+                connection.close()
+            store = SQLiteStore(temp, self.default_config)
+            store.initialize()
+            self.assertEqual(store.read_queue()[0]["rootFolderPath"], "")
+            store.write_queue([{"type": "movie", "externalId": "imdb:tt1", "title": "One", "status": "todo", "source": "List", "rootFolderPath": "/Disney"}])
+            self.assertEqual(store.read_queue()[0]["rootFolderPath"], "/Disney")
 
     def test_duplicate_legacy_rows_are_preserved_for_safe_migration(self):
         with tempfile.TemporaryDirectory() as folder:
